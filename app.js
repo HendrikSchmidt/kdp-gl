@@ -1,9 +1,5 @@
-const csvCandidates = [
-  "Ga%CC%88steliste%201605.csv",
-  "G%C3%A4steliste%201605.csv",
-  "Gästeliste 1605.csv",
-];
-
+const guestDataFile = "guests.csv";
+const obfuscationKey = "vip-1605-door";
 const storageKey = "vip-guestlist-checkins-v1";
 
 const state = {
@@ -101,16 +97,30 @@ function bindEvents() {
   globalThis.addEventListener("hashchange", renderRoute);
 }
 
-function loadCsv() {
-  return csvCandidates.reduce((promise, candidate) => {
-    return promise.catch(async () => {
-      const response = await fetch(candidate);
-      if (!response.ok) {
-        throw new Error(`Failed to load ${candidate}`);
-      }
-      return response.text();
-    });
-  }, Promise.reject(new Error("No CSV candidates configured")));
+async function loadCsv() {
+  const response = await fetch(guestDataFile);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${guestDataFile}`);
+  }
+
+  return decodeGuestData(await response.text());
+}
+
+function decodeGuestData(text) {
+  const [format, ...payloadLines] = text.trim().split(/\r?\n/);
+  if (format !== "XOR_BASE64,v1") {
+    throw new Error("Unsupported guest data format");
+  }
+
+  const encrypted = Uint8Array.from(atob(payloadLines.join("")), (char) => char.codePointAt(0));
+  const key = new TextEncoder().encode(obfuscationKey);
+  const decoded = new Uint8Array(encrypted.length);
+
+  encrypted.forEach((byte, index) => {
+    decoded[index] = byte ^ key[index % key.length];
+  });
+
+  return new TextDecoder().decode(decoded);
 }
 
 function parseCsv(text) {
