@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VIP Guestlist Check-In</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">VIP Guestlist</p>
+          <h1>Check-In</h1>
+        </div>
+        <div class="stats" aria-live="polite">
+          <span><strong id="checked-count">0</strong> checked in</span>
+          <span><strong id="total-count">0</strong> total</span>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Guest search">
+        <label for="search">Search guest</label>
+        <input id="search" type="search" autocomplete="off" placeholder="Name, first name, status...">
+      </section>
+
+      <section class="list-panel">
+        <div id="loading" class="message">Loading guest list...</div>
+        <ul id="guest-list" class="guest-list" aria-label="VIP guests"></ul>
+        <div id="empty-state" class="message hidden">No guests match your search.</div>
+      </section>
+    </main>
+
+    <aside id="detail-view" class="detail-view hidden" aria-labelledby="detail-title">
+      <button id="close-detail" class="ghost-button" type="button">Back to list</button>
+      <p class="eyebrow">Checked in guest</p>
+      <h2 id="detail-title">Guest details</h2>
+      <dl>
+        <div>
+          <dt>Checked in at</dt>
+          <dd id="detail-time"></dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd id="detail-status"></dd>
+        </div>
+      </dl>
+      <button id="reset-guest" class="danger-button" type="button">Check out / reset status</button>
+    </aside>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
