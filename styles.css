@@ -303,11 +303,13 @@ h2 {
   }
 
   .guest-card {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    min-height: 64px;
+    padding: 10px 12px;
   }
 
   .details-button {
-    grid-column: 2;
-    justify-self: start;
+    padding: 8px 10px;
   }
 }
