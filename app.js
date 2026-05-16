@@ -9,13 +9,30 @@ const defaultSyncConfig = {
 };
 const syncConfig = configuredSync ? { ...defaultSyncConfig, ...configuredSync } : defaultSyncConfig;
 const syncEnabled = Boolean(syncConfig.endpoint);
+const listConfigs = {
+  guestlist: {
+    label: "Gästeliste",
+    sheetName: "Gästeliste",
+  },
+  skiplist: {
+    label: "Skipliste",
+    sheetName: "Skipliste",
+  },
+};
 
 const state = {
-  guests: [],
+  activeListId: "guestlist",
+  lists: {
+    guestlist: [],
+    skiplist: [],
+  },
   checkins: readCheckins(),
+  pendingMutations: {},
   query: "",
   syncStatus: syncEnabled ? "Syncing with Google Sheets..." : "Local mode",
 };
+
+let latestAppliedSyncRun = 0;
 
 const elements = {
   checkedCount: document.querySelector("#checked-count"),
@@ -27,6 +44,7 @@ const elements = {
   detailView: document.querySelector("#detail-view"),
   emptyState: document.querySelector("#empty-state"),
   guestList: document.querySelector("#guest-list"),
+  listTabs: document.querySelectorAll("[data-list-tab]"),
   loading: document.querySelector("#loading"),
   resetGuest: document.querySelector("#reset-guest"),
   search: document.querySelector("#search"),
@@ -36,10 +54,9 @@ await init();
 
 async function init() {
   try {
-    state.guests = await loadGuests();
+    state.lists = await loadLists();
 
     elements.loading.classList.add("hidden");
-    elements.totalCount.textContent = state.guests.length;
     bindEvents();
     render();
     renderRoute();
@@ -54,6 +71,16 @@ function bindEvents() {
   elements.search.addEventListener("input", (event) => {
     state.query = event.target.value;
     render();
+  });
+
+  elements.listTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      state.activeListId = tab.dataset.listTab;
+      state.query = "";
+      elements.search.value = "";
+      location.hash = "";
+      render();
+    });
   });
 
   elements.guestList.addEventListener("click", (event) => {
@@ -80,11 +107,12 @@ function bindEvents() {
     const guestId = getRouteGuestId();
     if (!guestId) return;
 
+    const updatedAt = markPendingReset(guestId);
     delete state.checkins[guestId];
     writeCheckins();
     location.hash = "";
     render();
-    await syncGuestReset(guestId);
+    await syncGuestReset(guestId, updatedAt);
   });
 
   document.querySelector("#close-detail").addEventListener("click", () => {
@@ -103,22 +131,30 @@ async function loadCsv() {
   return decodeGuestData(await response.text());
 }
 
-async function loadGuests() {
+async function loadLists() {
   if (syncEnabled) {
     try {
-      const response = await requestSync("guests");
-      state.syncStatus = "Loaded guests from Google Sheets";
-      return mapGuestRows(response.guests || []);
+      const entries = await Promise.all(
+        Object.entries(listConfigs).map(async ([listId, config]) => {
+          const response = await requestSync("guests", { list: config.sheetName });
+          return [listId, mapGuestRows(response.guests || [], listId)];
+        }),
+      );
+      state.syncStatus = "Loaded lists from Google Sheets";
+      return Object.fromEntries(entries);
     } catch (error) {
       state.syncStatus = "Using offline guest list";
       console.error(error);
     }
   }
 
-  return mapGuestRows(parseCsv(await loadCsv()));
+  return {
+    guestlist: mapGuestRows(parseCsv(await loadCsv()), "guestlist"),
+    skiplist: [],
+  };
 }
 
-function mapGuestRows(rows) {
+function mapGuestRows(rows, listId) {
   return rows.map((row, index) => {
     const lastName = clean(row.Name);
     const firstName = clean(row.Vorname);
@@ -126,7 +162,8 @@ function mapGuestRows(rows) {
     const category = clean(row.Kategorie);
 
     return {
-      id: makeGuestId(lastName, firstName, index),
+      id: makeGuestId(listId, lastName, firstName, index),
+      listId,
       lastName,
       firstName,
       status,
@@ -206,10 +243,17 @@ function parseCsv(text) {
 
 function render() {
   const filteredGuests = getFilteredGuests();
-  const checkedCount = Object.keys(state.checkins).filter((id) => state.guests.some((guest) => guest.id === id)).length;
+  const activeGuests = getActiveGuests();
+  const checkedCount = Object.keys(state.checkins).filter((id) => activeGuests.some((guest) => guest.id === id)).length;
 
   elements.checkedCount.textContent = checkedCount;
+  elements.totalCount.textContent = activeGuests.length;
   elements.syncStatus.textContent = state.syncStatus;
+  elements.listTabs.forEach((tab) => {
+    const isActive = tab.dataset.listTab === state.activeListId;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-pressed", String(isActive));
+  });
   elements.emptyState.classList.toggle("hidden", filteredGuests.length > 0);
   elements.guestList.innerHTML = filteredGuests.map(renderGuest).join("");
 }
@@ -240,7 +284,7 @@ function renderGuest(guest) {
 
 function renderRoute() {
   const guestId = getRouteGuestId();
-  const guest = state.guests.find((item) => item.id === guestId);
+  const guest = getAllGuests().find((item) => item.id === guestId);
   const checkin = guest ? state.checkins[guest.id] : null;
 
   if (!guest || !checkin) {
@@ -250,7 +294,7 @@ function renderRoute() {
 
   elements.detailTitle.textContent = guest.displayName;
   elements.detailTime.textContent = formatDateTime(checkin.checkedInAt);
-  elements.detailStatus.textContent = [guest.status, guest.category].filter(Boolean).join(" · ") || "VIP";
+  elements.detailStatus.textContent = [listConfigs[guest.listId]?.label, guest.status, guest.category].filter(Boolean).join(" · ") || "VIP";
   elements.detailView.classList.remove("hidden");
 }
 
@@ -262,12 +306,13 @@ async function toggleGuest(guestId) {
   }
 
   const checkedInAt = new Date().toISOString();
+  const updatedAt = markPendingCheckin(guestId, checkedInAt);
   state.checkins[guestId] = {
     checkedInAt,
   };
   writeCheckins();
   render();
-  await syncGuestCheckin(guestId, checkedInAt);
+  await syncGuestCheckin(guestId, checkedInAt, updatedAt);
 }
 
 function openDetail(guestId) {
@@ -276,14 +321,23 @@ function openDetail(guestId) {
 
 function getFilteredGuests() {
   const normalizedQuery = normalize(state.query);
+  const activeGuests = getActiveGuests();
 
   if (!normalizedQuery) {
-    return state.guests;
+    return activeGuests;
   }
 
-  return state.guests.filter((guest) => {
+  return activeGuests.filter((guest) => {
     return normalize([guest.displayName, guest.lastName, guest.firstName, guest.status, guest.category].join(" ")).includes(normalizedQuery);
   });
+}
+
+function getActiveGuests() {
+  return state.lists[state.activeListId] || [];
+}
+
+function getAllGuests() {
+  return Object.values(state.lists).flat();
 }
 
 function getRouteGuestId() {
@@ -314,12 +368,21 @@ function startSync() {
 }
 
 async function syncFromSheet() {
+  const syncRun = Date.now();
+
   try {
     const response = await requestSync("list");
+    if (syncRun < latestAppliedSyncRun) {
+      return;
+    }
+    latestAppliedSyncRun = syncRun;
+
     const checkins = response.checkins || {};
-    state.checkins = Object.fromEntries(
-      Object.entries(checkins).filter(([guestId]) => state.guests.some((guest) => guest.id === guestId)),
+    const knownGuestIds = new Set(getAllGuests().map((guest) => guest.id));
+    const sheetCheckins = Object.fromEntries(
+      Object.entries(checkins).filter(([guestId]) => knownGuestIds.has(guestId)),
     );
+    state.checkins = mergeSheetCheckins(sheetCheckins);
     state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
     writeCheckins();
     render();
@@ -331,12 +394,12 @@ async function syncFromSheet() {
   }
 }
 
-async function syncGuestCheckin(guestId, checkedInAt) {
+async function syncGuestCheckin(guestId, checkedInAt, updatedAt) {
   if (!syncEnabled) return;
 
   try {
-    await requestSync("checkin", { guestId, checkedInAt });
-    state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
+    await requestSync("checkin", { guestId, checkedInAt, updatedAt });
+    state.syncStatus = "Sync pending";
     render();
   } catch (error) {
     state.syncStatus = "Sync pending";
@@ -345,18 +408,62 @@ async function syncGuestCheckin(guestId, checkedInAt) {
   }
 }
 
-async function syncGuestReset(guestId) {
+async function syncGuestReset(guestId, updatedAt) {
   if (!syncEnabled) return;
 
   try {
-    await requestSync("reset", { guestId });
-    state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
+    await requestSync("reset", { guestId, updatedAt });
+    state.syncStatus = "Sync pending";
     render();
   } catch (error) {
     state.syncStatus = "Sync pending";
     render();
     console.error(error);
   }
+}
+
+function markPendingCheckin(guestId, checkedInAt) {
+  const updatedAt = new Date().toISOString();
+  state.pendingMutations[guestId] = {
+    checkedInAt,
+    updatedAt,
+  };
+  return updatedAt;
+}
+
+function markPendingReset(guestId) {
+  const updatedAt = new Date().toISOString();
+  state.pendingMutations[guestId] = {
+    checkedInAt: null,
+    updatedAt,
+  };
+  return updatedAt;
+}
+
+function mergeSheetCheckins(sheetCheckins) {
+  const mergedCheckins = { ...sheetCheckins };
+
+  Object.entries(state.pendingMutations).forEach(([guestId, mutation]) => {
+    const sheetCheckin = sheetCheckins[guestId];
+
+    if (mutation.checkedInAt && sheetCheckin?.checkedInAt === mutation.checkedInAt) {
+      delete state.pendingMutations[guestId];
+      return;
+    }
+
+    if (mutation.checkedInAt === null && !sheetCheckin) {
+      delete state.pendingMutations[guestId];
+      return;
+    }
+
+    if (mutation.checkedInAt) {
+      mergedCheckins[guestId] = { checkedInAt: mutation.checkedInAt };
+    } else {
+      delete mergedCheckins[guestId];
+    }
+  });
+
+  return mergedCheckins;
 }
 
 function requestSync(action, params = {}) {
@@ -397,8 +504,8 @@ function parseSyncResponse(text, callbackName, action) {
   return response;
 }
 
-function makeGuestId(lastName, firstName, index) {
-  return `${normalize(lastName)}-${normalize(firstName)}-${index}`;
+function makeGuestId(listId, lastName, firstName, index) {
+  return `${listId}-${normalize(lastName)}-${normalize(firstName)}-${index}`;
 }
 
 function clean(value) {

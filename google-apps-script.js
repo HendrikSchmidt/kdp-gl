@@ -1,5 +1,6 @@
 const SHEET_NAME = "Checkins";
-const GUEST_SHEET_NAME = "Guests";
+const GUEST_SHEET_NAME = "Gästeliste";
+const SKIP_SHEET_NAME = "Skipliste";
 const SHARED_SECRET = "change-me";
 
 function setupCheckinsSheet() {
@@ -21,13 +22,13 @@ function doGet(event) {
     if (action === "checkin") {
       requireParam(params, "guestId");
       requireParam(params, "checkedInAt");
-      upsertCheckin(sheet, params.guestId, params.checkedInAt, true);
+      upsertCheckin(sheet, params.guestId, params.checkedInAt, true, params.updatedAt);
       return jsonp(callback, { ok: true });
     }
 
     if (action === "reset") {
       requireParam(params, "guestId");
-      upsertCheckin(sheet, params.guestId, "", false);
+      upsertCheckin(sheet, params.guestId, "", false, params.updatedAt);
       return jsonp(callback, { ok: true });
     }
 
@@ -36,7 +37,7 @@ function doGet(event) {
     }
 
     if (action === "guests") {
-      return jsonp(callback, { ok: true, guests: getGuests() });
+      return jsonp(callback, { ok: true, guests: getGuests(params.list || GUEST_SHEET_NAME) });
     }
 
     throw new Error(`Unknown action: ${action}`);
@@ -57,24 +58,28 @@ function getSheet() {
   return sheet;
 }
 
-function getGuestSheet() {
+function getGuestSheet(sheetName) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const namedSheet = spreadsheet.getSheetByName(GUEST_SHEET_NAME);
+  const namedSheet = spreadsheet.getSheetByName(sheetName);
 
   if (namedSheet) {
     return namedSheet;
   }
 
-  const sourceSheet = spreadsheet.getSheets().find((sheet) => sheet.getName() !== SHEET_NAME);
+  if (sheetName !== GUEST_SHEET_NAME) {
+    throw new Error(`Create a source tab named ${sheetName}`);
+  }
+
+  const sourceSheet = spreadsheet.getSheets().find((sheet) => sheet.getName() !== SHEET_NAME && sheet.getName() !== SKIP_SHEET_NAME);
   if (!sourceSheet) {
-    throw new Error(`Create a guest source tab or a tab named ${GUEST_SHEET_NAME}`);
+    throw new Error(`Create a source tab named ${sheetName}`);
   }
 
   return sourceSheet;
 }
 
-function getGuests() {
-  const values = getGuestSheet().getDataRange().getValues();
+function getGuests(sheetName) {
+  const values = getGuestSheet(sheetName).getDataRange().getValues();
   if (values.length < 2) {
     return [];
   }
@@ -109,12 +114,17 @@ function getActiveCheckins(sheet) {
   return checkins;
 }
 
-function upsertCheckin(sheet, guestId, checkedInAt, active) {
+function upsertCheckin(sheet, guestId, checkedInAt, active, updatedAt) {
   const values = sheet.getDataRange().getValues();
-  const now = new Date();
+  const now = parseDate(updatedAt) || new Date();
 
   for (let rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     if (values[rowIndex][0] === guestId) {
+      const previousUpdate = parseDate(values[rowIndex][2]);
+      if (previousUpdate && previousUpdate > now) {
+        return;
+      }
+
       sheet.getRange(rowIndex + 1, 2, 1, 3).setValues([[checkedInAt, now, active]]);
       return;
     }
@@ -150,4 +160,13 @@ function formatCellValue(value) {
   }
 
   return String(value || "").trim();
+}
+
+function parseDate(value) {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
