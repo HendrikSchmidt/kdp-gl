@@ -14,6 +14,7 @@
           <h1>Check-In</h1>
         </div>
         <div class="stats" aria-live="polite">
+          <span id="sync-status">Local mode</span>
           <span><strong id="checked-count">0</strong> checked in</span>
           <span><strong id="total-count">0</strong> total</span>
         </div>
@@ -48,6 +49,7 @@
       <button id="reset-guest" class="danger-button" type="button">Check out / reset status</button>
     </aside>
 
+    <script src="sync-config.js"></script>
     <script src="app.js" type="module"></script>
   </body>
 </html>
