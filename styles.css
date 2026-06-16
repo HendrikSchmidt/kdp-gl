@@ -349,6 +349,76 @@ h2 {
   color: #fff;
 }
 
+.access-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top left, #fff8e8 0, var(--bg) 42rem);
+}
+
+.access-card {
+  width: min(420px, 100%);
+  padding: 28px 26px 26px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.access-card h2 {
+  margin: 0 0 6px;
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+}
+
+.access-hint {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.access-card input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  outline: none;
+  background: var(--panel-strong);
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.access-card input:focus {
+  border-color: var(--accent);
+}
+
+.access-error {
+  min-height: 1.2em;
+  margin: 9px 2px 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.access-submit {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 850;
+}
+
+.access-submit[disabled] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 @media (max-width: 680px) {
   .hero {
     align-items: flex-start;

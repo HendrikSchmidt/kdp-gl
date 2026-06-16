@@ -1,7 +1,9 @@
 const SHEET_NAME = "Checkins";
 const GUEST_SHEET_NAME = "Gästeliste";
 const SKIP_SHEET_NAME = "Skipliste";
-const SHARED_SECRET = "change-me";
+// One or more valid access codes. Add a new code per event and remove old ones
+// to revoke access. Use long, unguessable values.
+const ACCESS_CODES = ["change-me-to-a-real-code"];
 
 function setupCheckinsSheet() {
   getSheet();
@@ -12,7 +14,7 @@ function doGet(event) {
   const callback = params.callback || "callback";
 
   try {
-    if (params.secret !== SHARED_SECRET) {
+    if (!isAuthorized(params.secret)) {
       throw new Error("Unauthorized");
     }
 
@@ -44,6 +46,10 @@ function doGet(event) {
   } catch (error) {
     return jsonp(callback, { ok: false, error: error.message });
   }
+}
+
+function isAuthorized(secret) {
+  return typeof secret === "string" && secret.length > 0 && ACCESS_CODES.indexOf(secret) !== -1;
 }
 
 function getSheet() {

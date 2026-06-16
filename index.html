@@ -7,6 +7,27 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
+    <section id="access-gate" class="access-gate hidden" aria-labelledby="access-gate-title">
+      <form id="access-form" class="access-card">
+        <p class="eyebrow">VIP Guestlist</p>
+        <h2 id="access-gate-title">Enter access code</h2>
+        <p class="access-hint">Ask the organizer for the code for this event.</p>
+        <input
+          id="access-input"
+          type="password"
+          inputmode="text"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          placeholder="Access code"
+          aria-label="Access code"
+        >
+        <p id="access-error" class="access-error" role="alert"></p>
+        <button id="access-submit" class="access-submit" type="submit">Unlock</button>
+      </form>
+    </section>
+
     <main class="app-shell">
       <section class="hero">
         <div>
@@ -14,7 +35,7 @@
           <h1>Check-In</h1>
         </div>
         <div class="stats" aria-live="polite">
-          <span id="sync-status">Local mode</span>
+          <span id="sync-status">Syncing with Google Sheets...</span>
           <span><strong id="checked-count">0</strong> checked in</span>
           <span><strong id="total-count">0</strong> total</span>
         </div>

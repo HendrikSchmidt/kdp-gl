@@ -1,6 +1,5 @@
-const guestDataFile = "guests.csv";
-const obfuscationKey = "vip-1605-door";
 const storageKey = "vip-guestlist-checkins-v1";
+const accessCodeKey = "vip-guestlist-access-code-v1";
 const configuredSync = globalThis.GUESTLIST_SYNC_CONFIG;
 const defaultSyncConfig = {
   endpoint: "",
@@ -8,7 +7,6 @@ const defaultSyncConfig = {
   pollMs: 3000,
 };
 const syncConfig = configuredSync ? { ...defaultSyncConfig, ...configuredSync } : defaultSyncConfig;
-const syncEnabled = Boolean(syncConfig.endpoint);
 const listConfigs = {
   guestlist: {
     label: "Gästeliste",
@@ -29,10 +27,11 @@ const state = {
   checkins: readCheckins(),
   pendingMutations: {},
   query: "",
-  syncStatus: syncEnabled ? "Syncing with Google Sheets..." : "Local mode",
+  syncStatus: "Syncing with Google Sheets...",
 };
 
 let latestAppliedSyncRun = 0;
+let appStarted = false;
 
 const elements = {
   checkedCount: document.querySelector("#checked-count"),
@@ -48,22 +47,132 @@ const elements = {
   loading: document.querySelector("#loading"),
   resetGuest: document.querySelector("#reset-guest"),
   search: document.querySelector("#search"),
+  accessGate: document.querySelector("#access-gate"),
+  accessForm: document.querySelector("#access-form"),
+  accessInput: document.querySelector("#access-input"),
+  accessError: document.querySelector("#access-error"),
+  accessSubmit: document.querySelector("#access-submit"),
 };
 
-await init();
+await boot();
 
-async function init() {
+async function boot() {
+  if (!syncConfig.endpoint) {
+    elements.loading.textContent = "Google Sheets sync is not configured. Set GUESTLIST_SYNC_CONFIG.endpoint in sync-config.js.";
+    return;
+  }
+
+  bindGate();
+
+  const code = takeAccessCodeFromUrl() || readStoredCode();
+  if (code) {
+    syncConfig.secret = code;
+    await start({ fromStorage: true });
+  } else {
+    showGate();
+  }
+}
+
+async function start({ fromStorage = false } = {}) {
+  setGateBusy(true);
+  elements.accessError.textContent = "";
+
   try {
     state.lists = await loadLists();
 
+    storeCode(syncConfig.secret);
+    hideGate();
     elements.loading.classList.add("hidden");
-    bindEvents();
+
+    if (!appStarted) {
+      bindEvents();
+      startSync();
+      appStarted = true;
+    }
+
     render();
     renderRoute();
-    startSync();
   } catch (error) {
-    elements.loading.textContent = "Could not load the guest list. Run this from a local server or GitHub Pages.";
+    setGateBusy(false);
+    syncConfig.secret = "";
     console.error(error);
+
+    if (isAuthError(error)) {
+      clearStoredCode();
+      showGate(fromStorage ? "That code is no longer valid. Enter the current code." : "That code didn't work. Try again.");
+    } else {
+      showGate(error.message || "Could not reach the guest list. Check your connection and try again.");
+    }
+  }
+}
+
+function bindGate() {
+  elements.accessForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const code = elements.accessInput.value.trim();
+    if (!code) {
+      return;
+    }
+    syncConfig.secret = code;
+    await start({ fromStorage: false });
+  });
+}
+
+function showGate(message = "") {
+  elements.accessError.textContent = message;
+  elements.accessGate.classList.remove("hidden");
+  setGateBusy(false);
+  elements.accessInput.focus();
+  elements.accessInput.select();
+}
+
+function hideGate() {
+  elements.accessGate.classList.add("hidden");
+  elements.accessInput.value = "";
+}
+
+function setGateBusy(isBusy) {
+  elements.accessSubmit.disabled = isBusy;
+  elements.accessSubmit.textContent = isBusy ? "Checking..." : "Unlock";
+}
+
+function isAuthError(error) {
+  return /unauthorized/i.test(error?.message || "");
+}
+
+function takeAccessCodeFromUrl() {
+  const url = new URL(location.href);
+  const code = url.searchParams.get("code");
+  if (!code) {
+    return "";
+  }
+
+  url.searchParams.delete("code");
+  history.replaceState(null, "", url.pathname + url.search + url.hash);
+  return code.trim();
+}
+
+function readStoredCode() {
+  try {
+    return localStorage.getItem(accessCodeKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeCode(code) {
+  try {
+    localStorage.setItem(accessCodeKey, code);
+  } catch {
+    // Ignore storage failures; the code stays in memory for this session.
+  }
+}
+
+function clearStoredCode() {
+  try {
+    localStorage.removeItem(accessCodeKey);
+  } catch {
+    // Ignore storage failures.
   }
 }
 
@@ -122,36 +231,15 @@ function bindEvents() {
   globalThis.addEventListener("hashchange", renderRoute);
 }
 
-async function loadCsv() {
-  const response = await fetch(guestDataFile);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${guestDataFile}`);
-  }
-
-  return decodeGuestData(await response.text());
-}
-
 async function loadLists() {
-  if (syncEnabled) {
-    try {
-      const entries = await Promise.all(
-        Object.entries(listConfigs).map(async ([listId, config]) => {
-          const response = await requestSync("guests", { list: config.sheetName });
-          return [listId, mapGuestRows(response.guests || [], listId)];
-        }),
-      );
-      state.syncStatus = "Loaded lists from Google Sheets";
-      return Object.fromEntries(entries);
-    } catch (error) {
-      state.syncStatus = "Using offline guest list";
-      console.error(error);
-    }
-  }
-
-  return {
-    guestlist: mapGuestRows(parseCsv(await loadCsv()), "guestlist"),
-    skiplist: [],
-  };
+  const entries = await Promise.all(
+    Object.entries(listConfigs).map(async ([listId, config]) => {
+      const response = await requestSync("guests", { list: config.sheetName });
+      return [listId, mapGuestRows(response.guests || [], listId)];
+    }),
+  );
+  state.syncStatus = "Loaded lists from Google Sheets";
+  return Object.fromEntries(entries);
 }
 
 function mapGuestRows(rows, listId) {
@@ -171,74 +259,6 @@ function mapGuestRows(rows, listId) {
       displayName: [firstName, lastName].filter(Boolean).join(" "),
     };
   });
-}
-
-function decodeGuestData(text) {
-  const [format, ...payloadLines] = text.trim().split(/\r?\n/);
-  if (format !== "XOR_BASE64,v1") {
-    throw new Error("Unsupported guest data format");
-  }
-
-  const encrypted = Uint8Array.from(atob(payloadLines.join("")), (char) => char.codePointAt(0));
-  const key = new TextEncoder().encode(obfuscationKey);
-  const decoded = new Uint8Array(encrypted.length);
-
-  encrypted.forEach((byte, index) => {
-    decoded[index] = byte ^ key[index % key.length];
-  });
-
-  return new TextDecoder().decode(decoded);
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let value = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (char === '"' && inQuotes && next === '"') {
-      value += '"';
-      index += 1;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      row.push(value);
-      value = "";
-    } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") {
-        index += 1;
-      }
-      row.push(value);
-      rows.push(row);
-      row = [];
-      value = "";
-    } else {
-      value += char;
-    }
-  }
-
-  if (value || row.length) {
-    row.push(value);
-    rows.push(row);
-  }
-
-  const headerEntries = rows
-    .shift()
-    .map((header, index) => ({ header: header.trim(), index }))
-    .filter((entry) => entry.header);
-
-  return rows
-    .filter((csvRow) => csvRow.some((cell) => clean(cell)))
-    .map((csvRow) => {
-      return headerEntries.reduce((result, { header, index }) => {
-        result[header] = csvRow[index] ?? "";
-        return result;
-      }, {});
-    });
 }
 
 function render() {
@@ -358,11 +378,6 @@ function writeCheckins() {
 }
 
 function startSync() {
-  if (!syncEnabled) {
-    render();
-    return;
-  }
-
   syncFromSheet();
   setInterval(syncFromSheet, syncConfig.pollMs);
 }
@@ -395,8 +410,6 @@ async function syncFromSheet() {
 }
 
 async function syncGuestCheckin(guestId, checkedInAt, updatedAt) {
-  if (!syncEnabled) return;
-
   try {
     await requestSync("checkin", { guestId, checkedInAt, updatedAt });
     state.syncStatus = "Sync pending";
@@ -409,8 +422,6 @@ async function syncGuestCheckin(guestId, checkedInAt, updatedAt) {
 }
 
 async function syncGuestReset(guestId, updatedAt) {
-  if (!syncEnabled) return;
-
   try {
     await requestSync("reset", { guestId, updatedAt });
     state.syncStatus = "Sync pending";
