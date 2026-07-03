@@ -1,5 +1,5 @@
 globalThis.GUESTLIST_SYNC_CONFIG = {
-  endpoint: "https://script.google.com/macros/s/AKfycbzmEeixRLnAAPzTcmR5E_WjWbjDZH1VCcEPLkQ31KUpDpCjOp_i2HuHlHmkbeupmyU/exec",
+  endpoint: "https://script.google.com/macros/s/AKfycbxMKfFRpuP8vvTjhQAaIWkdroFQSr4QWnauPWObw64wP_6vh8AtMvrfU1_mqyk-xNWt4g/exec",
   // The access code is not stored here. Staff enter it in the app (or open a
   // per-event link like ?code=THE-CODE). It must match an entry in
   // ACCESS_CODES in google-apps-script.js.
