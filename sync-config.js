@@ -4,4 +4,8 @@ globalThis.GUESTLIST_SYNC_CONFIG = {
   // per-event link like ?code=THE-CODE). It must match an entry in
   // ACCESS_CODES in google-apps-script.js.
   pollMs: 3000,
+  // TXL in Concert (tomorrow): only the Skipliste is used for this event.
+  // Revert to ["guestlist", "skiplist"] (or remove this line) for events
+  // that use both lists.
+  enabledLists: ["skiplist"],
 };

@@ -5,9 +5,12 @@ const defaultSyncConfig = {
   endpoint: "",
   secret: "",
   pollMs: 3000,
+  // Which lists this event uses. Defaults to both. Set to e.g. ["skiplist"]
+  // in sync-config.js to run an event with only one list.
+  enabledLists: ["guestlist", "skiplist"],
 };
 const syncConfig = configuredSync ? { ...defaultSyncConfig, ...configuredSync } : defaultSyncConfig;
-const listConfigs = {
+const allListConfigs = {
   guestlist: {
     label: "Gästeliste",
     sheetName: "Gästeliste",
@@ -17,13 +20,12 @@ const listConfigs = {
     sheetName: "Skipliste",
   },
 };
+const enabledListIds = Object.keys(allListConfigs).filter((listId) => syncConfig.enabledLists.includes(listId));
+const listConfigs = Object.fromEntries(enabledListIds.map((listId) => [listId, allListConfigs[listId]]));
 
 const state = {
-  activeListId: "guestlist",
-  lists: {
-    guestlist: [],
-    skiplist: [],
-  },
+  activeListId: enabledListIds[0] || "guestlist",
+  lists: Object.fromEntries(enabledListIds.map((listId) => [listId, []])),
   checkins: readCheckins(),
   pendingMutations: {},
   query: "",
@@ -43,6 +45,7 @@ const elements = {
   detailView: document.querySelector("#detail-view"),
   emptyState: document.querySelector("#empty-state"),
   guestList: document.querySelector("#guest-list"),
+  listTabsNav: document.querySelector("#list-tabs-nav"),
   listTabs: document.querySelectorAll("[data-list-tab]"),
   loading: document.querySelector("#loading"),
   resetGuest: document.querySelector("#reset-guest"),
@@ -63,6 +66,7 @@ async function boot() {
   }
 
   bindGate();
+  setupListTabs();
 
   const code = takeAccessCodeFromUrl() || readStoredCode();
   if (code) {
@@ -104,6 +108,15 @@ async function start({ fromStorage = false } = {}) {
       showGate(error.message || "Could not reach the guest list. Check your connection and try again.");
     }
   }
+}
+
+function setupListTabs() {
+  elements.listTabs.forEach((tab) => {
+    if (!listConfigs[tab.dataset.listTab]) {
+      tab.classList.add("hidden");
+    }
+  });
+  elements.listTabsNav.classList.toggle("hidden", enabledListIds.length <= 1);
 }
 
 function bindGate() {
