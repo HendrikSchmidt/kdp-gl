@@ -247,6 +247,12 @@ h2 {
   font-weight: 850;
 }
 
+.guest-name.placeholder {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 750;
+}
+
 .checked-in .guest-name {
   color: var(--muted);
   text-decoration: line-through;
@@ -267,6 +273,12 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.56);
+}
+
+.pill.warning {
+  border-color: #e4c4a4;
+  background: #fff0e2;
+  color: #8a4b16;
 }
 
 .details-button {

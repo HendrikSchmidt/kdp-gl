@@ -1,3 +1,5 @@
+import { clean, mapGuestRows, mergeCheckins, normalize } from "./guest-model.js";
+
 const storageKey = "vip-guestlist-checkins-v1";
 const accessCodeKey = "vip-guestlist-access-code-v1";
 const configuredSync = globalThis.GUESTLIST_SYNC_CONFIG;
@@ -34,6 +36,7 @@ const state = {
 
 let latestAppliedSyncRun = 0;
 let appStarted = false;
+let renderedGuestListHtml = "";
 
 const elements = {
   checkedCount: document.querySelector("#checked-count"),
@@ -82,7 +85,7 @@ async function start({ fromStorage = false } = {}) {
   elements.accessError.textContent = "";
 
   try {
-    state.lists = await loadLists();
+    applySnapshot(await fetchSnapshot());
 
     storeCode(syncConfig.secret);
     hideGate();
@@ -229,12 +232,15 @@ function bindEvents() {
     const guestId = getRouteGuestId();
     if (!guestId) return;
 
-    const updatedAt = markPendingReset(guestId);
+    const guest = findGuest(guestId);
+    if (!guest) return;
+
+    markPendingReset(guestId);
     delete state.checkins[guestId];
     writeCheckins();
     location.hash = "";
     render();
-    await syncGuestReset(guestId, updatedAt);
+    await syncGuestReset(guest);
   });
 
   document.querySelector("#close-detail").addEventListener("click", () => {
@@ -244,34 +250,25 @@ function bindEvents() {
   globalThis.addEventListener("hashchange", renderRoute);
 }
 
-async function loadLists() {
-  const entries = await Promise.all(
-    Object.entries(listConfigs).map(async ([listId, config]) => {
-      const response = await requestSync("guests", { list: config.sheetName });
-      return [listId, mapGuestRows(response.guests || [], listId)];
+async function fetchSnapshot() {
+  const sheetNames = Object.values(listConfigs).map((config) => config.sheetName);
+  const response = await requestSync("list", { lists: sheetNames.join(",") });
+  if (!response.guests) {
+    throw new Error("The Apps Script is out of date. Deploy the current google-apps-script.js.");
+  }
+
+  return Object.fromEntries(
+    Object.entries(listConfigs).map(([listId, config]) => {
+      return [listId, mapGuestRows(response.guests[config.sheetName] || [], listId)];
     }),
   );
-  state.syncStatus = "Loaded lists from Google Sheets";
-  return Object.fromEntries(entries);
 }
 
-function mapGuestRows(rows, listId) {
-  return rows.map((row, index) => {
-    const lastName = clean(row.Name);
-    const firstName = clean(row.Vorname);
-    const status = clean(row.Status);
-    const category = clean(row.Kategorie);
-
-    return {
-      id: makeGuestId(listId, lastName, firstName, index),
-      listId,
-      lastName,
-      firstName,
-      status,
-      category,
-      displayName: [firstName, lastName].filter(Boolean).join(" "),
-    };
-  });
+function applySnapshot(lists) {
+  state.lists = lists;
+  state.checkins = mergeCheckins(getAllGuests(), state.pendingMutations);
+  state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
+  writeCheckins();
 }
 
 function render() {
@@ -288,13 +285,19 @@ function render() {
     tab.setAttribute("aria-pressed", String(isActive));
   });
   elements.emptyState.classList.toggle("hidden", filteredGuests.length > 0);
-  elements.guestList.innerHTML = filteredGuests.map(renderGuest).join("");
+  // Replacing the cards on every poll can swallow a tap that is in progress.
+  const guestListHtml = filteredGuests.map(renderGuest).join("");
+  if (guestListHtml !== renderedGuestListHtml) {
+    elements.guestList.innerHTML = guestListHtml;
+    renderedGuestListHtml = guestListHtml;
+  }
 }
 
 function renderGuest(guest) {
   const checkin = state.checkins[guest.id];
   const checked = Boolean(checkin);
   const meta = [guest.status, guest.category].filter(Boolean);
+  const rowLabel = guest.nameless ? (guest.rowNumber ? `Zeile ${guest.rowNumber}` : "unvollständig") : "";
 
   return `
     <li class="guest-card ${checked ? "checked-in" : ""}" data-guest-id="${escapeHtml(guest.id)}">
@@ -302,8 +305,9 @@ function renderGuest(guest) {
         ${checked ? "✓" : ""}
       </button>
       <div class="guest-main">
-        <p class="guest-name">${escapeHtml(guest.displayName)}</p>
+        <p class="guest-name${guest.nameless ? " placeholder" : ""}">${escapeHtml(guest.displayName)}</p>
         <div class="guest-meta">
+          ${rowLabel ? `<span class="pill warning">${escapeHtml(rowLabel)}</span>` : ""}
           ${meta.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}
           ${checked ? `<span>${formatTime(checkin.checkedInAt)}</span>` : ""}
         </div>
@@ -338,14 +342,17 @@ async function toggleGuest(guestId) {
     return;
   }
 
+  const guest = findGuest(guestId);
+  if (!guest) return;
+
   const checkedInAt = new Date().toISOString();
-  const updatedAt = markPendingCheckin(guestId, checkedInAt);
+  markPendingCheckin(guestId, checkedInAt);
   state.checkins[guestId] = {
     checkedInAt,
   };
   writeCheckins();
   render();
-  await syncGuestCheckin(guestId, checkedInAt, updatedAt);
+  await syncGuestCheckin(guest, checkedInAt);
 }
 
 function openDetail(guestId) {
@@ -371,6 +378,10 @@ function getActiveGuests() {
 
 function getAllGuests() {
   return Object.values(state.lists).flat();
+}
+
+function findGuest(guestId) {
+  return getAllGuests().find((guest) => guest.id === guestId);
 }
 
 function getRouteGuestId() {
@@ -399,20 +410,12 @@ async function syncFromSheet() {
   const syncRun = Date.now();
 
   try {
-    const response = await requestSync("list");
+    const lists = await fetchSnapshot();
     if (syncRun < latestAppliedSyncRun) {
       return;
     }
     latestAppliedSyncRun = syncRun;
-
-    const checkins = response.checkins || {};
-    const knownGuestIds = new Set(getAllGuests().map((guest) => guest.id));
-    const sheetCheckins = Object.fromEntries(
-      Object.entries(checkins).filter(([guestId]) => knownGuestIds.has(guestId)),
-    );
-    state.checkins = mergeSheetCheckins(sheetCheckins);
-    state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
-    writeCheckins();
+    applySnapshot(lists);
     render();
     renderRoute();
   } catch (error) {
@@ -422,9 +425,9 @@ async function syncFromSheet() {
   }
 }
 
-async function syncGuestCheckin(guestId, checkedInAt, updatedAt) {
+async function syncGuestCheckin(guest, checkedInAt) {
   try {
-    await requestSync("checkin", { guestId, checkedInAt, updatedAt });
+    await requestSync("checkin", { list: listConfigs[guest.listId].sheetName, guestId: guest.sheetId, checkedInAt });
     state.syncStatus = "Sync pending";
     render();
   } catch (error) {
@@ -434,9 +437,9 @@ async function syncGuestCheckin(guestId, checkedInAt, updatedAt) {
   }
 }
 
-async function syncGuestReset(guestId, updatedAt) {
+async function syncGuestReset(guest) {
   try {
-    await requestSync("reset", { guestId, updatedAt });
+    await requestSync("reset", { list: listConfigs[guest.listId].sheetName, guestId: guest.sheetId });
     state.syncStatus = "Sync pending";
     render();
   } catch (error) {
@@ -447,47 +450,11 @@ async function syncGuestReset(guestId, updatedAt) {
 }
 
 function markPendingCheckin(guestId, checkedInAt) {
-  const updatedAt = new Date().toISOString();
-  state.pendingMutations[guestId] = {
-    checkedInAt,
-    updatedAt,
-  };
-  return updatedAt;
+  state.pendingMutations[guestId] = { checkedInAt };
 }
 
 function markPendingReset(guestId) {
-  const updatedAt = new Date().toISOString();
-  state.pendingMutations[guestId] = {
-    checkedInAt: null,
-    updatedAt,
-  };
-  return updatedAt;
-}
-
-function mergeSheetCheckins(sheetCheckins) {
-  const mergedCheckins = { ...sheetCheckins };
-
-  Object.entries(state.pendingMutations).forEach(([guestId, mutation]) => {
-    const sheetCheckin = sheetCheckins[guestId];
-
-    if (mutation.checkedInAt && sheetCheckin?.checkedInAt === mutation.checkedInAt) {
-      delete state.pendingMutations[guestId];
-      return;
-    }
-
-    if (mutation.checkedInAt === null && !sheetCheckin) {
-      delete state.pendingMutations[guestId];
-      return;
-    }
-
-    if (mutation.checkedInAt) {
-      mergedCheckins[guestId] = { checkedInAt: mutation.checkedInAt };
-    } else {
-      delete mergedCheckins[guestId];
-    }
-  });
-
-  return mergedCheckins;
+  state.pendingMutations[guestId] = { checkedInAt: null };
 }
 
 function requestSync(action, params = {}) {
@@ -528,30 +495,21 @@ function parseSyncResponse(text, callbackName, action) {
   return response;
 }
 
-function makeGuestId(listId, lastName, firstName, index) {
-  return `${listId}-${normalize(lastName)}-${normalize(firstName)}-${index}`;
-}
-
-function clean(value) {
-  return String(value ?? "").trim();
-}
-
-function normalize(value) {
-  return clean(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
 function formatTime(value) {
-  return new Intl.DateTimeFormat("de-DE", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return formatDate(value, { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDateTime(value) {
-  return new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDate(value, { dateStyle: "medium", timeStyle: "short" });
+}
+
+// The Eingecheckt cell can hold hand-typed text such as "x".
+function formatDate(value, options) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return clean(value);
+  }
+  return new Intl.DateTimeFormat("de-DE", options).format(date);
 }
 
 function escapeHtml(value) {

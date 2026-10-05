@@ -20,13 +20,14 @@ This app has no build step. Push the repository to GitHub and enable Pages for t
 
 1. Create or open the Google Sheet with your lists.
 2. Make sure the source tabs are named `Gästeliste` and `Skipliste`. (Only tabs for lists you actually enable are required — see [Running an event with only one list](#running-an-event-with-only-one-list).)
-3. Each source tab should have headers named `Name`, `Vorname`, `Status`, and optionally `Kategorie`. If there is no `Gästeliste` tab, the script uses the first tab that is not `Checkins` or `Skipliste`.
-4. In the Sheet, open **Extensions > Apps Script**.
-5. Paste the contents of `google-apps-script.js` into the Apps Script editor.
-6. Set `ACCESS_CODES` in Apps Script to one or more long, unguessable codes.
-7. Deploy the script via **Deploy > New deployment > Web app**.
-8. Set **Execute as** to yourself and **Who has access** to anyone with the link.
-9. Copy the Web App URL into `sync-config.js` as `endpoint`.
+3. Each source tab should have headers named `Name` (or `Nachname`), `Vorname`, `Status`, and optionally `Kategorie`. A title row above the headers is fine. If there is no `Gästeliste` tab, the script uses the first tab that is not `Skipliste`.
+4. The script adds two columns to each tab: `ID`, which it fills in for every guest, and `Eingecheckt`, where it writes the check-in time.
+5. In the Sheet, open **Extensions > Apps Script**.
+6. Paste the contents of `google-apps-script.js` into the Apps Script editor.
+7. Set `ACCESS_CODES` in Apps Script to one or more long, unguessable codes.
+8. Deploy the script via **Deploy > New deployment > Web app**.
+9. Set **Execute as** to yourself and **Who has access** to anyone with the link.
+10. Copy the Web App URL into `sync-config.js` as `endpoint`.
 
 Example:
 
@@ -37,7 +38,19 @@ globalThis.GUESTLIST_SYNC_CONFIG = {
 };
 ```
 
-The app loads `Gästeliste` and/or `Skipliste` from the Sheet (depending on `enabledLists`, see below), polls check-in status every few seconds, and writes check-ins/resets immediately.
+The app loads `Gästeliste` and/or `Skipliste` from the Sheet (depending on `enabledLists`, see below), reloads them every few seconds, and writes check-ins/resets immediately.
+
+## Editing the list during an event
+
+Each check-in is stored in the guest's own row, in the `Eingecheckt` column. The app finds the row by its `ID`, so you can:
+
+- fill in a missing first name, status, or other column after the guest was already checked in
+- add a walk-up by typing into a new row anywhere in the list
+- sort the tab — select all columns, including `ID` and `Eingecheckt`, so whole rows move together
+- leave a row incomplete — it shows up as "Ohne Namen" (with its sheet row number) and can still be checked in
+- check someone in or out by hand: type anything into `Eingecheckt` to mark them, clear the cell to reset them
+
+Don't edit or delete `ID` cells. Deleting a row also deletes that guest's check-in. If you copy a whole row, the copy gets a new `ID` and starts out not checked in.
 
 ## Running an event with only one list
 
@@ -74,14 +87,15 @@ protection, not strong security.
 
 ## Update the guest list
 
-Edit the `Gästeliste` and `Skipliste` tabs in your Google Sheet. The app picks up changes on the next sync poll.
+Edit the `Gästeliste` and `Skipliste` tabs in your Google Sheet. Open apps pick up new rows and edited cells on the next sync poll, without a reload. See [Editing the list during an event](#editing-the-list-during-an-event).
 
 ## Checklist for a new event
 
 1. **Sheet**: create a new Google Sheet (or reuse/duplicate a previous one) for the event.
    - Add a `Skipliste` tab and/or `Gästeliste` tab, whichever the event needs.
-   - Each tab needs a header row: `Name`, `Vorname`, `Status`, and optionally `Kategorie`.
-   - Fill in one guest per row below the header. Leave the `Checkins` tab alone — the script creates and manages it automatically.
+   - Each tab needs a header row: `Name`, `Vorname`, `Status`, and optionally `Kategorie`. The script adds the `ID` and `Eingecheckt` columns itself.
+   - Fill in one guest per row below the header. Incomplete rows are okay.
+   - If you duplicated a previous sheet, clear the `Eingecheckt` column so last event's check-ins don't carry over.
 2. **Apps Script**: open **Extensions > Apps Script** on the sheet.
    - Paste in the current `google-apps-script.js` (or confirm it's already there if you duplicated a previous sheet).
    - Set `ACCESS_CODES` to a fresh, unguessable code (or codes) for this event. Remove old codes from past events so they no longer work.

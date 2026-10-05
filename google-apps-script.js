@@ -1,13 +1,14 @@
-const SHEET_NAME = "Checkins";
 const GUEST_SHEET_NAME = "Gästeliste";
 const SKIP_SHEET_NAME = "Skipliste";
+const ID_HEADER = "ID";
+const CHECKIN_HEADER = "Eingecheckt";
+const NAME_ALIASES = ["name", "nachname", "lastname", "last name"];
+const FIRST_ALIASES = ["vorname", "firstname", "first name"];
+const STATUS_ALIASES = ["status"];
+const CATEGORY_ALIASES = ["kategorie", "category"];
 // One or more valid access codes. Add a new code per event and remove old ones
 // to revoke access. Use long, unguessable values.
 const ACCESS_CODES = ["change-me-to-a-real-code"];
-
-function setupCheckinsSheet() {
-  getSheet();
-}
 
 function doGet(event) {
   const params = event.parameter || {};
@@ -19,27 +20,32 @@ function doGet(event) {
     }
 
     const action = params.action || "list";
-    const sheet = getSheet();
+
+    if (action === "list") {
+      const guests = {};
+      String(params.lists || GUEST_SHEET_NAME)
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .forEach((name) => {
+          guests[name] = getGuests(name);
+        });
+      return jsonp(callback, { ok: true, guests });
+    }
 
     if (action === "checkin") {
+      requireParam(params, "list");
       requireParam(params, "guestId");
       requireParam(params, "checkedInAt");
-      upsertCheckin(sheet, params.guestId, params.checkedInAt, true, params.updatedAt);
+      setCheckin(params.list, params.guestId, params.checkedInAt);
       return jsonp(callback, { ok: true });
     }
 
     if (action === "reset") {
+      requireParam(params, "list");
       requireParam(params, "guestId");
-      upsertCheckin(sheet, params.guestId, "", false, params.updatedAt);
+      setCheckin(params.list, params.guestId, "");
       return jsonp(callback, { ok: true });
-    }
-
-    if (action === "list") {
-      return jsonp(callback, { ok: true, checkins: getActiveCheckins(sheet) });
-    }
-
-    if (action === "guests") {
-      return jsonp(callback, { ok: true, guests: getGuests(params.list || GUEST_SHEET_NAME) });
     }
 
     throw new Error(`Unknown action: ${action}`);
@@ -50,18 +56,6 @@ function doGet(event) {
 
 function isAuthorized(secret) {
   return typeof secret === "string" && secret.length > 0 && ACCESS_CODES.indexOf(secret) !== -1;
-}
-
-function getSheet() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = spreadsheet.getSheetByName(SHEET_NAME);
-
-  if (!sheet) {
-    sheet = spreadsheet.insertSheet(SHEET_NAME);
-    sheet.appendRow(["guestId", "checkedInAt", "updatedAt", "active"]);
-  }
-
-  return sheet;
 }
 
 function getGuestSheet(sheetName) {
@@ -76,7 +70,7 @@ function getGuestSheet(sheetName) {
     throw new Error(`Create a source tab named ${sheetName}`);
   }
 
-  const sourceSheet = spreadsheet.getSheets().find((sheet) => sheet.getName() !== SHEET_NAME && sheet.getName() !== SKIP_SHEET_NAME);
+  const sourceSheet = spreadsheet.getSheets().find((sheet) => sheet.getName() !== SKIP_SHEET_NAME);
   if (!sourceSheet) {
     throw new Error(`Create a source tab named ${sheetName}`);
   }
@@ -85,58 +79,156 @@ function getGuestSheet(sheetName) {
 }
 
 function getGuests(sheetName) {
-  const values = getGuestSheet(sheetName).getDataRange().getValues();
-  if (values.length < 2) {
-    return [];
+  const sheet = getGuestSheet(sheetName);
+  const table = readTable(sheet, sheetName);
+  if (!table.changed) {
+    return table.guests;
   }
 
-  const headerEntries = values[0]
-    .map((header, index) => ({ header: String(header).trim(), index }))
-    .filter((entry) => entry.header);
-
-  return values
-    .slice(1)
-    .filter((row) => row.some((cell) => String(cell).trim()))
-    .map((row) => {
-      return headerEntries.reduce((guest, { header, index }) => {
-        guest[header] = formatCellValue(row[index]);
-        return guest;
-      }, {});
-    });
-}
-
-function getActiveCheckins(sheet) {
-  const values = sheet.getDataRange().getValues();
-  const checkins = {};
-
-  values.slice(1).forEach(([guestId, checkedInAt, , active]) => {
-    if (guestId && active === true) {
-      checkins[guestId] = {
-        checkedInAt: formatValueDate(checkedInAt),
-      };
+  return withLock(() => {
+    const fresh = readTable(sheet, sheetName);
+    if (fresh.changed) {
+      writeColumns(sheet, fresh);
     }
+    return fresh.guests;
   });
-
-  return checkins;
 }
 
-function upsertCheckin(sheet, guestId, checkedInAt, active, updatedAt) {
-  const values = sheet.getDataRange().getValues();
-  const now = parseDate(updatedAt) || new Date();
+function setCheckin(sheetName, guestId, checkedInAt) {
+  const sheet = getGuestSheet(sheetName);
 
-  for (let rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
-    if (values[rowIndex][0] === guestId) {
-      const previousUpdate = parseDate(values[rowIndex][2]);
-      if (previousUpdate && previousUpdate > now) {
-        return;
-      }
+  withLock(() => {
+    const table = readTable(sheet, sheetName);
+    if (table.changed) {
+      writeColumns(sheet, table);
+    }
 
-      sheet.getRange(rowIndex + 1, 2, 1, 3).setValues([[checkedInAt, now, active]]);
+    const guest = table.guests.find((item) => item.id === guestId);
+    if (!guest) {
+      throw new Error("Guest not found. The row may have been deleted.");
+    }
+
+    // A second device checking in the same guest keeps the first time.
+    if (checkedInAt && guest.checkedInAt) {
       return;
     }
+
+    const value = checkedInAt ? parseDate(checkedInAt) || checkedInAt : "";
+    sheet.getRange(guest.rowNumber, table.checkinColumn + 1).setValue(value);
+  });
+}
+
+function withLock(callback) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function readTable(sheet, sheetName) {
+  const values = sheet.getDataRange().getValues();
+  const headerRowIndex = findHeaderRowIndex(values);
+  if (headerRowIndex < 0) {
+    throw new Error(`Sheet "${sheetName}" needs a Name column`);
+  }
+  return buildTable(values, headerRowIndex, () => Utilities.getUuid());
+}
+
+function writeColumns(sheet, table) {
+  [table.idColumn, table.checkinColumn].forEach((column) => {
+    const cells = table.rows.map((row) => [row[column] ?? ""]);
+    sheet.getRange(1, column + 1, cells.length, 1).setValues(cells);
+  });
+}
+
+// Gives every guest row a permanent ID so check-ins stay attached when names
+// are edited or rows are inserted and sorted.
+function buildTable(values, headerRowIndex, createId) {
+  const rows = values.map((row) => row.slice());
+  const header = rows[headerRowIndex];
+  let nextColumn = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  let changed = false;
+
+  const ensureColumn = (title) => {
+    let index = findColumn(header, [title.toLowerCase()]);
+    if (index === -1) {
+      index = nextColumn;
+      nextColumn += 1;
+      header[index] = title;
+      changed = true;
+    }
+    return index;
+  };
+
+  const idColumn = ensureColumn(ID_HEADER);
+  const checkinColumn = ensureColumn(CHECKIN_HEADER);
+  const columns = {
+    Name: findColumn(header, NAME_ALIASES),
+    Vorname: findColumn(header, FIRST_ALIASES),
+    Status: findColumn(header, STATUS_ALIASES),
+    Kategorie: findColumn(header, CATEGORY_ALIASES),
+  };
+
+  const seen = new Set();
+  const guests = [];
+
+  for (let rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    while (row.length < nextColumn) {
+      row.push("");
+    }
+
+    const hasFields = row.some((cell, index) => {
+      return index !== idColumn && index !== checkinColumn && String(cell ?? "").trim() !== "";
+    });
+    let id = String(row[idColumn] ?? "").trim();
+    if (!hasFields && !id) {
+      continue;
+    }
+
+    if (!id || seen.has(id)) {
+      // A copied row also copies the original guest's check-in.
+      if (id) {
+        row[checkinColumn] = "";
+      }
+      id = createId();
+      row[idColumn] = id;
+      changed = true;
+    }
+    seen.add(id);
+
+    const guest = { id, rowNumber: rowIndex + 1, checkedInAt: formatCellValue(row[checkinColumn]) };
+    Object.keys(columns).forEach((key) => {
+      guest[key] = columns[key] === -1 ? "" : formatCellValue(row[columns[key]]);
+    });
+    guests.push(guest);
   }
 
-  sheet.appendRow([guestId, checkedInAt, now, active]);
+  return { rows, guests, changed, idColumn, checkinColumn };
+}
+
+function findHeaderRowIndex(values) {
+  const limit = Math.min(values.length, 15);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    if (findColumn(values[rowIndex], NAME_ALIASES) !== -1) {
+      return rowIndex;
+    }
+  }
+  return -1;
+}
+
+function findColumn(header, aliases) {
+  const keys = header.map((cell) => String(cell ?? "").trim().toLowerCase());
+  for (const alias of aliases) {
+    const index = keys.indexOf(alias);
+    if (index !== -1) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function requireParam(params, name) {
@@ -152,27 +244,19 @@ function jsonp(callback, payload) {
     .setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
 
-function formatValueDate(value) {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  return String(value);
-}
-
 function formatCellValue(value) {
   if (value instanceof Date) {
     return value.toISOString();
   }
 
-  return String(value || "").trim();
+  if (value == null) {
+    return "";
+  }
+
+  return String(value).trim();
 }
 
 function parseDate(value) {
-  if (value instanceof Date) {
-    return value;
-  }
-
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
