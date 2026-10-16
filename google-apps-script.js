@@ -181,13 +181,20 @@ function buildTable(values, headerRowIndex, createId) {
       row.push("");
     }
 
-    const hasFields = row.some((cell, index) => {
-      return index !== idColumn && index !== checkinColumn && String(cell ?? "").trim() !== "";
+    const hasPerson = [columns.Name, columns.Vorname].some((index) => {
+      return index !== -1 && String(row[index] ?? "").trim() !== "";
     });
-    let id = String(row[idColumn] ?? "").trim();
-    if (!hasFields && !id) {
+    if (!hasPerson) {
+      // Deleting a guest's name frees the row, so drop its ID and check-in too.
+      if (String(row[idColumn] ?? "").trim() !== "" || String(row[checkinColumn] ?? "").trim() !== "") {
+        row[idColumn] = "";
+        row[checkinColumn] = "";
+        changed = true;
+      }
       continue;
     }
+
+    let id = String(row[idColumn] ?? "").trim();
 
     if (!id || seen.has(id)) {
       // A copied row also copies the original guest's check-in.
