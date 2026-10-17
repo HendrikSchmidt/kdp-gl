@@ -12,6 +12,9 @@ export function createSheet(rows) {
     getName() {
       return this.name || "";
     },
+    isSheetHidden() {
+      return Boolean(this.hidden);
+    },
     getDataRange() {
       return {
         getValues() {

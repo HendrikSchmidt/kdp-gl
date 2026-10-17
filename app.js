@@ -7,27 +7,14 @@ const defaultSyncConfig = {
   endpoint: "",
   secret: "",
   pollMs: 3000,
-  // Which lists this event uses. Defaults to both. Set to e.g. ["skiplist"]
-  // in sync-config.js to run an event with only one list.
-  enabledLists: ["guestlist", "skiplist"],
 };
 const syncConfig = configuredSync ? { ...defaultSyncConfig, ...configuredSync } : defaultSyncConfig;
-const allListConfigs = {
-  guestlist: {
-    label: "Gästeliste",
-    sheetName: "Gästeliste",
-  },
-  skiplist: {
-    label: "Skipliste",
-    sheetName: "Skipliste",
-  },
-};
-const enabledListIds = Object.keys(allListConfigs).filter((listId) => syncConfig.enabledLists.includes(listId));
-const listConfigs = Object.fromEntries(enabledListIds.map((listId) => [listId, allListConfigs[listId]]));
 
+// Lists are the sheet's tabs, keyed by tab name. listIds keeps the tab order.
 const state = {
-  activeListId: enabledListIds[0] || "guestlist",
-  lists: Object.fromEntries(enabledListIds.map((listId) => [listId, []])),
+  activeListId: "",
+  listIds: [],
+  lists: {},
   checkins: readCheckins(),
   pendingMutations: {},
   query: "",
@@ -37,6 +24,7 @@ const state = {
 let latestAppliedSyncRun = 0;
 let appStarted = false;
 let renderedGuestListHtml = "";
+let renderedListTabsHtml = "";
 
 const elements = {
   checkedCount: document.querySelector("#checked-count"),
@@ -49,7 +37,6 @@ const elements = {
   emptyState: document.querySelector("#empty-state"),
   guestList: document.querySelector("#guest-list"),
   listTabsNav: document.querySelector("#list-tabs-nav"),
-  listTabs: document.querySelectorAll("[data-list-tab]"),
   loading: document.querySelector("#loading"),
   resetGuest: document.querySelector("#reset-guest"),
   search: document.querySelector("#search"),
@@ -69,7 +56,6 @@ async function boot() {
   }
 
   bindGate();
-  setupListTabs();
 
   const code = takeAccessCodeFromUrl() || readStoredCode();
   if (code) {
@@ -111,15 +97,6 @@ async function start({ fromStorage = false } = {}) {
       showGate(error.message || "Could not reach the guest list. Check your connection and try again.");
     }
   }
-}
-
-function setupListTabs() {
-  elements.listTabs.forEach((tab) => {
-    if (!listConfigs[tab.dataset.listTab]) {
-      tab.classList.add("hidden");
-    }
-  });
-  elements.listTabsNav.classList.toggle("hidden", enabledListIds.length <= 1);
 }
 
 function bindGate() {
@@ -198,14 +175,15 @@ function bindEvents() {
     render();
   });
 
-  elements.listTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      state.activeListId = tab.dataset.listTab;
-      state.query = "";
-      elements.search.value = "";
-      location.hash = "";
-      render();
-    });
+  elements.listTabsNav.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-list-tab]");
+    if (!tab) return;
+
+    state.activeListId = tab.dataset.listTab;
+    state.query = "";
+    elements.search.value = "";
+    location.hash = "";
+    render();
   });
 
   elements.guestList.addEventListener("click", (event) => {
@@ -251,21 +229,20 @@ function bindEvents() {
 }
 
 async function fetchSnapshot() {
-  const sheetNames = Object.values(listConfigs).map((config) => config.sheetName);
-  const response = await requestSync("list", { lists: sheetNames.join(",") });
-  if (!response.guests) {
+  const response = await requestSync("list");
+  if (!response.lists) {
     throw new Error("The Apps Script is out of date. Deploy the current google-apps-script.js.");
   }
 
-  return Object.fromEntries(
-    Object.entries(listConfigs).map(([listId, config]) => {
-      return [listId, mapGuestRows(response.guests[config.sheetName] || [], listId)];
-    }),
-  );
+  return response.lists.map(({ name, guests }) => ({ id: name, guests: mapGuestRows(guests, name) }));
 }
 
 function applySnapshot(lists) {
-  state.lists = lists;
+  state.listIds = lists.map((list) => list.id);
+  state.lists = Object.fromEntries(lists.map((list) => [list.id, list.guests]));
+  if (!state.listIds.includes(state.activeListId)) {
+    state.activeListId = state.listIds[0] || "";
+  }
   state.checkins = mergeCheckins(getAllGuests(), state.pendingMutations);
   state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
   writeCheckins();
@@ -279,11 +256,7 @@ function render() {
   elements.checkedCount.textContent = checkedCount;
   elements.totalCount.textContent = activeGuests.length;
   elements.syncStatus.textContent = state.syncStatus;
-  elements.listTabs.forEach((tab) => {
-    const isActive = tab.dataset.listTab === state.activeListId;
-    tab.classList.toggle("active", isActive);
-    tab.setAttribute("aria-pressed", String(isActive));
-  });
+  renderListTabs();
   elements.emptyState.classList.toggle("hidden", filteredGuests.length > 0);
   // Replacing the cards on every poll can swallow a tap that is in progress.
   const guestListHtml = filteredGuests.map(renderGuest).join("");
@@ -293,11 +266,24 @@ function render() {
   }
 }
 
+function renderListTabs() {
+  elements.listTabsNav.classList.toggle("hidden", state.listIds.length <= 1);
+  const listTabsHtml = state.listIds
+    .map((listId) => {
+      const isActive = listId === state.activeListId;
+      return `<button class="list-tab${isActive ? " active" : ""}" type="button" aria-pressed="${isActive}" data-list-tab="${escapeHtml(listId)}">${escapeHtml(listId)}</button>`;
+    })
+    .join("");
+  if (listTabsHtml !== renderedListTabsHtml) {
+    elements.listTabsNav.innerHTML = listTabsHtml;
+    renderedListTabsHtml = listTabsHtml;
+  }
+}
+
 function renderGuest(guest) {
   const checkin = state.checkins[guest.id];
   const checked = Boolean(checkin);
   const meta = [guest.status, guest.category].filter(Boolean);
-  const rowLabel = guest.nameless ? (guest.rowNumber ? `Zeile ${guest.rowNumber}` : "unvollständig") : "";
 
   return `
     <li class="guest-card ${checked ? "checked-in" : ""}" data-guest-id="${escapeHtml(guest.id)}">
@@ -305,9 +291,8 @@ function renderGuest(guest) {
         ${checked ? "✓" : ""}
       </button>
       <div class="guest-main">
-        <p class="guest-name${guest.nameless ? " placeholder" : ""}">${escapeHtml(guest.displayName)}</p>
+        <p class="guest-name">${escapeHtml(guest.displayName)}</p>
         <div class="guest-meta">
-          ${rowLabel ? `<span class="pill warning">${escapeHtml(rowLabel)}</span>` : ""}
           ${meta.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}
           ${checked ? `<span>${formatTime(checkin.checkedInAt)}</span>` : ""}
         </div>
@@ -331,7 +316,7 @@ function renderRoute() {
 
   elements.detailTitle.textContent = guest.displayName;
   elements.detailTime.textContent = formatDateTime(checkin.checkedInAt);
-  elements.detailStatus.textContent = [listConfigs[guest.listId]?.label, guest.status, guest.category].filter(Boolean).join(" · ") || "VIP";
+  elements.detailStatus.textContent = [guest.listId, guest.status, guest.category].filter(Boolean).join(" · ") || "VIP";
   elements.detailView.classList.remove("hidden");
 }
 
@@ -427,7 +412,7 @@ async function syncFromSheet() {
 
 async function syncGuestCheckin(guest, checkedInAt) {
   try {
-    await requestSync("checkin", { list: listConfigs[guest.listId].sheetName, guestId: guest.sheetId, checkedInAt });
+    await requestSync("checkin", { list: guest.listId, guestId: guest.sheetId, checkedInAt });
     state.syncStatus = "Sync pending";
     render();
   } catch (error) {
@@ -439,7 +424,7 @@ async function syncGuestCheckin(guest, checkedInAt) {
 
 async function syncGuestReset(guest) {
   try {
-    await requestSync("reset", { list: listConfigs[guest.listId].sheetName, guestId: guest.sheetId });
+    await requestSync("reset", { list: guest.listId, guestId: guest.sheetId });
     state.syncStatus = "Sync pending";
     render();
   } catch (error) {

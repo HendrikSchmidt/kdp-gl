@@ -5,26 +5,30 @@ import { createSheet, createSpreadsheet, loadAppsScript } from "./sheet-harness.
 
 const checkedInAt = "2026-10-02T18:00:00.000Z";
 
-function setup(guestRows) {
+function setup(guestRows, extraSheets = {}) {
   const sheets = {
     Gästeliste: createSheet(guestRows),
     Skipliste: createSheet([
       ["Name", "Vorname", "Status"],
       ["Klein", "Eva", "Skip"],
     ]),
+    ...extraSheets,
   };
-  sheets.Gästeliste.name = "Gästeliste";
-  sheets.Skipliste.name = "Skipliste";
 
   const api = loadAppsScript();
   api.setSpreadsheet(createSpreadsheet(sheets));
-  return { api, rows: sheets.Gästeliste._rows };
+  return { api, sheets, rows: sheets.Gästeliste._rows };
+}
+
+function lists(api) {
+  const response = api.doGet({ action: "list" });
+  assert.equal(response.ok, true, response.error);
+  return response.lists;
 }
 
 function guests(api) {
-  const response = api.doGet({ action: "list", lists: "Gästeliste,Skipliste" });
-  assert.equal(response.ok, true, response.error);
-  return mapGuestRows(response.guests.Gästeliste, "guestlist");
+  const list = lists(api).find((item) => item.name === "Gästeliste");
+  return mapGuestRows(list.guests, list.name);
 }
 
 function checkIn(api, guest, time = checkedInAt) {
@@ -160,25 +164,32 @@ test("checking in a deleted row fails instead of hitting another guest", () => {
   assert.equal(guests(api)[0].checkedInAt, "");
 });
 
-test("a nameless row under a title row keeps its check-in after the name is filled in", () => {
-  const { api, rows } = setup([
+test("a row needs a Name or Vorname to be a guest", () => {
+  const { api } = setup([
     ["Sommerfest"],
     ["Name", "Vorname", "Status"],
     ["", "", "Walk-up"],
+    ["", "Lena", ""],
+    ["Schmidt", "", ""],
+  ]);
+
+  assert.deepEqual(guests(api).map((guest) => guest.displayName), ["Lena", "Schmidt"]);
+});
+
+test("deleting a guest's name drops the row's ID and check-in", () => {
+  const { api, rows } = setup([
+    ["Sommerfest"],
+    ["Name", "Vorname", "Status"],
+    ["Schmidt", "Lena", "VIP"],
   ]);
 
   const [guest] = guests(api);
-  assert.equal(guest.nameless, true);
-  assert.equal(guest.rowNumber, 3);
   checkIn(api, guest);
+  rows[2][0] = "";
+  rows[2][1] = "";
 
-  rows[2][0] = "Schmidt";
-  rows[2][1] = "Lena";
-
-  const [named] = guests(api);
-  assert.equal(named.id, guest.id);
-  assert.equal(named.displayName, "Lena Schmidt");
-  assert.equal(named.checkedInAt, checkedInAt);
+  assert.deepEqual(guests(api), []);
+  assert.deepEqual(rows[2], ["", "", "VIP", "", ""]);
 });
 
 test("a hand-typed mark in Eingecheckt counts as checked in", () => {
@@ -203,9 +214,41 @@ test("Nachname is accepted as the last-name column", () => {
   assert.equal(guest.category, "A");
 });
 
-test("a sheet without a name column fails instead of returning a blank list", () => {
-  const { api } = setup([["Notiz", "Plus"], ["x", "y"]]);
-  const response = api.doGet({ action: "list", lists: "Gästeliste" });
+test("every visible tab with a Name column becomes a list, in tab order", () => {
+  const notes = createSheet([["Notiz", "Plus"], ["x", "y"]]);
+  const backstage = createSheet([["Nachname"], ["Roth"]]);
+  const archive = createSheet([["Name"], ["Alt"]]);
+  archive.hidden = true;
+  const { api, sheets } = setup([["Name"], ["Weber"]], { Notizen: notes, Backstage: backstage, Archiv: archive });
+
+  assert.deepEqual(lists(api).map((list) => list.name), ["Gästeliste", "Skipliste", "Backstage"]);
+  assert.deepEqual(sheets.Notizen._rows, [["Notiz", "Plus"], ["x", "y"]]);
+});
+
+test("a sheet with only Skipliste works without a Gästeliste tab", () => {
+  const skip = createSheet([["Name", "Vorname"], ["Klein", "Eva"]]);
+  const api = loadAppsScript();
+  api.setSpreadsheet(createSpreadsheet({ Skipliste: skip }));
+
+  const [list] = lists(api);
+  assert.equal(list.name, "Skipliste");
+  const [guest] = mapGuestRows(list.guests, list.name);
+  const response = api.doGet({ action: "checkin", list: "Skipliste", guestId: guest.sheetId, checkedInAt });
+  assert.equal(response.ok, true, response.error);
+});
+
+test("a sheet without any Name column fails instead of returning no lists", () => {
+  const api = loadAppsScript();
+  api.setSpreadsheet(createSpreadsheet({ Notizen: createSheet([["Notiz", "Plus"], ["x", "y"]]) }));
+  const response = api.doGet({ action: "list" });
   assert.equal(response.ok, false);
   assert.match(response.error, /Name column/);
+});
+
+test("checking in on a tab that was renamed fails", () => {
+  const { api } = setup([["Name"], ["Weber"]]);
+  const [guest] = guests(api);
+  const response = api.doGet({ action: "checkin", list: "Gaesteliste", guestId: guest.sheetId, checkedInAt });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /no longer exists/);
 });

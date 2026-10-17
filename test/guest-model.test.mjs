@@ -4,16 +4,11 @@ import { mapGuestRows, mergeCheckins } from "../guest-model.js";
 
 const checkedInAt = "2026-10-02T18:00:00.000Z";
 
-test("a row with no name stays addressable and marked incomplete", () => {
-  const [guest] = mapGuestRows(
-    [{ id: "walk", Name: "", Vorname: "  ", Status: "Walk-up", rowNumber: 4 }],
-    "skiplist",
-  );
+test("a guest id is scoped to its list", () => {
+  const [guest] = mapGuestRows([{ id: "walk", Name: "Klein", Vorname: "Eva" }], "Skipliste");
 
-  assert.equal(guest.displayName, "Ohne Namen");
-  assert.equal(guest.nameless, true);
-  assert.equal(guest.rowNumber, 4);
-  assert.equal(guest.id, "skiplist:walk");
+  assert.equal(guest.displayName, "Eva Klein");
+  assert.equal(guest.id, "Skipliste:walk");
   assert.equal(guest.sheetId, "walk");
 });
 

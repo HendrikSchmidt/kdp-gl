@@ -1,5 +1,3 @@
-const GUEST_SHEET_NAME = "Gästeliste";
-const SKIP_SHEET_NAME = "Skipliste";
 const ID_HEADER = "ID";
 const CHECKIN_HEADER = "Eingecheckt";
 const NAME_ALIASES = ["name", "nachname", "lastname", "last name"];
@@ -22,15 +20,7 @@ function doGet(event) {
     const action = params.action || "list";
 
     if (action === "list") {
-      const guests = {};
-      String(params.lists || GUEST_SHEET_NAME)
-        .split(",")
-        .map((name) => name.trim())
-        .filter(Boolean)
-        .forEach((name) => {
-          guests[name] = getGuests(name);
-        });
-      return jsonp(callback, { ok: true, guests });
+      return jsonp(callback, { ok: true, lists: getLists() });
     }
 
     if (action === "checkin") {
@@ -58,35 +48,37 @@ function isAuthorized(secret) {
   return typeof secret === "string" && secret.length > 0 && ACCESS_CODES.indexOf(secret) !== -1;
 }
 
-function getGuestSheet(sheetName) {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const namedSheet = spreadsheet.getSheetByName(sheetName);
+// Every visible tab with a Name column is a list, in tab order.
+function getLists() {
+  const lists = SpreadsheetApp.getActiveSpreadsheet()
+    .getSheets()
+    .filter((sheet) => !sheet.isSheetHidden())
+    .map((sheet) => ({ sheet, values: sheet.getDataRange().getValues() }))
+    .filter(({ values }) => findHeaderRowIndex(values) !== -1)
+    .map(({ sheet, values }) => ({ name: sheet.getName(), guests: getGuests(sheet, values) }));
 
-  if (namedSheet) {
-    return namedSheet;
+  if (lists.length === 0) {
+    throw new Error("No tab has a Name column. Add a header row with Name or Nachname.");
   }
-
-  if (sheetName !== GUEST_SHEET_NAME) {
-    throw new Error(`Create a source tab named ${sheetName}`);
-  }
-
-  const sourceSheet = spreadsheet.getSheets().find((sheet) => sheet.getName() !== SKIP_SHEET_NAME);
-  if (!sourceSheet) {
-    throw new Error(`Create a source tab named ${sheetName}`);
-  }
-
-  return sourceSheet;
+  return lists;
 }
 
-function getGuests(sheetName) {
-  const sheet = getGuestSheet(sheetName);
-  const table = readTable(sheet, sheetName);
+function getSheet(sheetName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`Tab "${sheetName}" no longer exists`);
+  }
+  return sheet;
+}
+
+function getGuests(sheet, values) {
+  const table = readTable(sheet, values);
   if (!table.changed) {
     return table.guests;
   }
 
   return withLock(() => {
-    const fresh = readTable(sheet, sheetName);
+    const fresh = readTable(sheet);
     if (fresh.changed) {
       writeColumns(sheet, fresh);
     }
@@ -95,10 +87,10 @@ function getGuests(sheetName) {
 }
 
 function setCheckin(sheetName, guestId, checkedInAt) {
-  const sheet = getGuestSheet(sheetName);
+  const sheet = getSheet(sheetName);
 
   withLock(() => {
-    const table = readTable(sheet, sheetName);
+    const table = readTable(sheet);
     if (table.changed) {
       writeColumns(sheet, table);
     }
@@ -128,11 +120,10 @@ function withLock(callback) {
   }
 }
 
-function readTable(sheet, sheetName) {
-  const values = sheet.getDataRange().getValues();
+function readTable(sheet, values = sheet.getDataRange().getValues()) {
   const headerRowIndex = findHeaderRowIndex(values);
   if (headerRowIndex < 0) {
-    throw new Error(`Sheet "${sheetName}" needs a Name column`);
+    throw new Error(`Tab "${sheet.getName()}" needs a Name column`);
   }
   return buildTable(values, headerRowIndex, () => Utilities.getUuid());
 }

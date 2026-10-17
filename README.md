@@ -19,8 +19,8 @@ This app has no build step. Push the repository to GitHub and enable Pages for t
 ## Google Sheets setup
 
 1. Create or open the Google Sheet with your lists.
-2. Make sure the source tabs are named `Gästeliste` and `Skipliste`. (Only tabs for lists you actually enable are required — see [Running an event with only one list](#running-an-event-with-only-one-list).)
-3. Each source tab should have headers named `Name` (or `Nachname`), `Vorname`, `Status`, and optionally `Kategorie`. A title row above the headers is fine. If there is no `Gästeliste` tab, the script uses the first tab that is not `Skipliste`.
+2. Add one tab per list, e.g. `Gästeliste` and `Skipliste`. The tab name is what the app shows — see [Which lists the app shows](#which-lists-the-app-shows).
+3. Each list tab needs headers named `Name` (or `Nachname`), and optionally `Vorname`, `Status`, and `Kategorie`. A title row above the headers is fine.
 4. The script adds two columns to each tab: `ID`, which it fills in for every guest, and `Eingecheckt`, where it writes the check-in time.
 5. In the Sheet, open **Extensions > Apps Script**.
 6. Paste the contents of `google-apps-script.js` into the Apps Script editor.
@@ -38,7 +38,7 @@ globalThis.GUESTLIST_SYNC_CONFIG = {
 };
 ```
 
-The app loads `Gästeliste` and/or `Skipliste` from the Sheet (depending on `enabledLists`, see below), reloads them every few seconds, and writes check-ins/resets immediately.
+The app loads every list tab from the Sheet, reloads them every few seconds, and writes check-ins/resets immediately.
 
 ## Editing the list during an event
 
@@ -47,27 +47,20 @@ Each check-in is stored in the guest's own row, in the `Eingecheckt` column. The
 - fill in a missing first name, status, or other column after the guest was already checked in
 - add a walk-up by typing into a new row anywhere in the list
 - sort the tab — select all columns, including `ID` and `Eingecheckt`, so whole rows move together
-- leave a row incomplete — it shows up as "Ohne Namen" (with its sheet row number) and can still be checked in
+- leave other columns empty — a row only needs a `Name` or a `Vorname` to show up; rows with neither are ignored
 - check someone in or out by hand: type anything into `Eingecheckt` to mark them, clear the cell to reset them
 
 Don't edit or delete `ID` cells. Deleting a row also deletes that guest's check-in. If you copy a whole row, the copy gets a new `ID` and starts out not checked in.
 
-## Running an event with only one list
+## Which lists the app shows
 
-Some events only need the `Skipliste` (or only the `Gästeliste`). Control this with
-`enabledLists` in `sync-config.js`:
+The Sheet decides. Every visible tab with a `Name` (or `Nachname`) header becomes a list in the app, named after the tab and in the same order as the tabs.
 
-```js
-globalThis.GUESTLIST_SYNC_CONFIG = {
-  endpoint: "...",
-  pollMs: 3000,
-  enabledLists: ["skiplist"], // only show/sync the Skipliste
-};
-```
-
-- Omit `enabledLists` (or set it to `["guestlist", "skiplist"]`) to show both tabs, which is the default.
-- When only one list is enabled, the app hides the list-switcher tabs entirely and shows that list directly — no tab to accidentally switch away from.
-- The app only fetches the sheet tab(s) for the enabled list(s), so a sheet used for a skiplist-only event doesn't need a `Gästeliste` tab at all.
+- A skiplist-only event just needs a `Skipliste` tab; no `Gästeliste` tab is required.
+- Tabs without a `Name` header (notes, pricing, etc.) are ignored and left untouched.
+- Hide a tab (right-click > **Hide sheet**) to keep it out of the app, e.g. an old list you want to keep around.
+- With only one list, the app hides the list switcher and shows that list directly.
+- Adding, renaming, or hiding a tab shows up in open apps on the next sync. Renaming a tab mid-event is fine, but a check-in tapped in the same few seconds can fail and needs to be tapped again.
 
 ## Access codes
 
@@ -87,13 +80,13 @@ protection, not strong security.
 
 ## Update the guest list
 
-Edit the `Gästeliste` and `Skipliste` tabs in your Google Sheet. Open apps pick up new rows and edited cells on the next sync poll, without a reload. See [Editing the list during an event](#editing-the-list-during-an-event).
+Edit the list tabs in your Google Sheet. Open apps pick up new rows and edited cells on the next sync poll, without a reload. See [Editing the list during an event](#editing-the-list-during-an-event).
 
 ## Checklist for a new event
 
 1. **Sheet**: create a new Google Sheet (or reuse/duplicate a previous one) for the event.
-   - Add a `Skipliste` tab and/or `Gästeliste` tab, whichever the event needs.
-   - Each tab needs a header row: `Name`, `Vorname`, `Status`, and optionally `Kategorie`. The script adds the `ID` and `Eingecheckt` columns itself.
+   - Add a tab for each list the event needs (e.g. `Skipliste` and/or `Gästeliste`). Hide or delete list tabs from a previous event that shouldn't show up.
+   - Each list tab needs a header row: `Name`, and optionally `Vorname`, `Status`, and `Kategorie`. The script adds the `ID` and `Eingecheckt` columns itself.
    - Fill in one guest per row below the header. Incomplete rows are okay.
    - If you duplicated a previous sheet, clear the `Eingecheckt` column so last event's check-ins don't carry over.
 2. **Apps Script**: open **Extensions > Apps Script** on the sheet.
@@ -103,7 +96,6 @@ Edit the `Gästeliste` and `Skipliste` tabs in your Google Sheet. Open apps pick
    - Copy the Web App URL.
 3. **App config** (`sync-config.js` in this repo):
    - Set `endpoint` to the Web App URL from step 2.
-   - Set `enabledLists` to match which lists this event uses, e.g. `["skiplist"]` for a skiplist-only event, or `["guestlist", "skiplist"]` (or omit it) for both.
    - Commit and deploy/push so the change goes live.
 4. **Share access**: send staff the access code, or a per-event link `https://your-site/?code=THE-CODE` so it's filled in automatically.
 5. On the day, double-check the app loads the right guests and that check-ins sync before doors open.

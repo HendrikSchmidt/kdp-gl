@@ -4,5 +4,4 @@ globalThis.GUESTLIST_SYNC_CONFIG = {
   // per-event link like ?code=THE-CODE). It must match an entry in
   // ACCESS_CODES in google-apps-script.js.
   pollMs: 3000,
-  enabledLists: ["guestlist", "skiplist"],
 };

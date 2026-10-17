@@ -77,7 +77,6 @@ const server = http.createServer(async (req, res) => {
     const body = `globalThis.GUESTLIST_SYNC_CONFIG = ${JSON.stringify({
       endpoint: `http://127.0.0.1:${port}/exec`,
       pollMs: 400,
-      enabledLists: ["guestlist", "skiplist"],
     })};\n`;
     res.writeHead(200, { "content-type": types[".js"], "cache-control": "no-store" });
     res.end(body);

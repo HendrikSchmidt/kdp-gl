@@ -11,7 +11,6 @@ export function mapGuestRows(rows, listId) {
     const sheetId = clean(row.id);
     const lastName = clean(row.Name);
     const firstName = clean(row.Vorname);
-    const nameless = !lastName && !firstName;
 
     return {
       id: `${listId}:${sheetId}`,
@@ -22,9 +21,7 @@ export function mapGuestRows(rows, listId) {
       status: clean(row.Status),
       category: clean(row.Kategorie),
       checkedInAt: clean(row.checkedInAt),
-      rowNumber: Number(row.rowNumber) || null,
-      nameless,
-      displayName: [firstName, lastName].filter(Boolean).join(" ") || "Ohne Namen",
+      displayName: [firstName, lastName].filter(Boolean).join(" "),
     };
   });
 }
