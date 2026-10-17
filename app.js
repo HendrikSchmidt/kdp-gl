@@ -18,7 +18,8 @@ const state = {
   checkins: readCheckins(),
   pendingMutations: {},
   query: "",
-  syncStatus: "Syncing with Google Sheets...",
+  syncStatus: "Syncing...",
+  syncTone: "pending",
 };
 
 let latestAppliedSyncRun = 0;
@@ -30,6 +31,11 @@ const elements = {
   checkedCount: document.querySelector("#checked-count"),
   syncStatus: document.querySelector("#sync-status"),
   totalCount: document.querySelector("#total-count"),
+  listTitle: document.querySelector("#list-title"),
+  progressFill: document.querySelector("#progress-fill"),
+  clearSearch: document.querySelector("#clear-search"),
+  toolbar: document.querySelector("#toolbar"),
+  toolbarSentinel: document.querySelector("#toolbar-sentinel"),
   detailStatus: document.querySelector("#detail-status"),
   detailTime: document.querySelector("#detail-time"),
   detailTitle: document.querySelector("#detail-title"),
@@ -175,6 +181,13 @@ function bindEvents() {
     render();
   });
 
+  elements.clearSearch.addEventListener("click", () => {
+    state.query = "";
+    elements.search.value = "";
+    elements.search.focus();
+    render();
+  });
+
   elements.listTabsNav.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-list-tab]");
     if (!tab) return;
@@ -186,18 +199,16 @@ function bindEvents() {
     render();
   });
 
+  new IntersectionObserver(([entry]) => {
+    elements.toolbar.classList.toggle("is-stuck", !entry.isIntersecting);
+  }).observe(elements.toolbarSentinel);
+
   elements.guestList.addEventListener("click", (event) => {
     const checkButton = event.target.closest("[data-check-id]");
-    const detailsButton = event.target.closest("[data-detail-id]");
     const guestCard = event.target.closest("[data-guest-id]");
 
     if (checkButton) {
       toggleGuest(checkButton.dataset.checkId);
-      return;
-    }
-
-    if (detailsButton) {
-      openDetail(detailsButton.dataset.detailId);
       return;
     }
 
@@ -225,6 +236,12 @@ function bindEvents() {
     location.hash = "";
   });
 
+  elements.detailView.addEventListener("click", (event) => {
+    if (event.target === elements.detailView) {
+      location.hash = "";
+    }
+  });
+
   globalThis.addEventListener("hashchange", renderRoute);
 }
 
@@ -244,8 +261,13 @@ function applySnapshot(lists) {
     state.activeListId = state.listIds[0] || "";
   }
   state.checkins = mergeCheckins(getAllGuests(), state.pendingMutations);
-  state.syncStatus = `Synced ${formatTime(new Date().toISOString())}`;
+  setSyncStatus(`Synced ${formatTime(new Date().toISOString())}`, "ok");
   writeCheckins();
+}
+
+function setSyncStatus(text, tone) {
+  state.syncStatus = text;
+  state.syncTone = tone;
 }
 
 function render() {
@@ -255,7 +277,11 @@ function render() {
 
   elements.checkedCount.textContent = checkedCount;
   elements.totalCount.textContent = activeGuests.length;
+  elements.progressFill.style.width = `${activeGuests.length ? (checkedCount / activeGuests.length) * 100 : 0}%`;
   elements.syncStatus.textContent = state.syncStatus;
+  elements.syncStatus.dataset.tone = state.syncTone;
+  elements.listTitle.textContent = state.activeListId || "Check-In";
+  elements.clearSearch.classList.toggle("hidden", !state.query);
   renderListTabs();
   elements.emptyState.classList.toggle("hidden", filteredGuests.length > 0);
   // Replacing the cards on every poll can swallow a tap that is in progress.
@@ -267,17 +293,14 @@ function render() {
 }
 
 function renderListTabs() {
-  elements.listTabsNav.classList.toggle("hidden", state.listIds.length === 0);
-  // A single list is shown as a label, so there is nothing to tap by mistake.
-  const listTabsHtml =
-    state.listIds.length === 1
-      ? `<span class="list-tab active">${escapeHtml(state.listIds[0])}</span>`
-      : state.listIds
-          .map((listId) => {
-            const isActive = listId === state.activeListId;
-            return `<button class="list-tab${isActive ? " active" : ""}" type="button" aria-pressed="${isActive}" data-list-tab="${escapeHtml(listId)}">${escapeHtml(listId)}</button>`;
-          })
-          .join("");
+  // A single list is already named in the title, so there is nothing to switch.
+  elements.listTabsNav.classList.toggle("hidden", state.listIds.length < 2);
+  const listTabsHtml = state.listIds
+    .map((listId) => {
+      const isActive = listId === state.activeListId;
+      return `<button class="list-tab${isActive ? " active" : ""}" type="button" aria-pressed="${isActive}" data-list-tab="${escapeHtml(listId)}">${escapeHtml(listId)}</button>`;
+    })
+    .join("");
   if (listTabsHtml !== renderedListTabsHtml) {
     elements.listTabsNav.innerHTML = listTabsHtml;
     renderedListTabsHtml = listTabsHtml;
@@ -290,20 +313,15 @@ function renderGuest(guest) {
   const meta = [guest.status, guest.category].filter(Boolean);
 
   return `
-    <li class="guest-card ${checked ? "checked-in" : ""}" data-guest-id="${escapeHtml(guest.id)}">
-      <button class="check-button" type="button" data-check-id="${escapeHtml(guest.id)}" aria-label="${checked ? "Reset" : "Check in"} ${escapeHtml(guest.displayName)}">
-        ${checked ? "✓" : ""}
+    <li class="guest-row${checked ? " checked-in" : ""}" data-guest-id="${escapeHtml(guest.id)}">
+      <button class="check-button" type="button" data-check-id="${escapeHtml(guest.id)}" aria-label="${checked ? "Details for" : "Check in"} ${escapeHtml(guest.displayName)}">
+        <span class="check-circle"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg></span>
       </button>
       <div class="guest-main">
         <p class="guest-name">${escapeHtml(guest.displayName)}</p>
-        <div class="guest-meta">
-          ${meta.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}
-          ${checked ? `<span>${formatTime(checkin.checkedInAt)}</span>` : ""}
-        </div>
+        ${meta.length ? `<p class="guest-meta">${meta.map(escapeHtml).join(" · ")}</p>` : ""}
       </div>
-      <button class="details-button" type="button" data-detail-id="${escapeHtml(guest.id)}" ${checked ? "" : "disabled"}>
-        Details
-      </button>
+      ${checked ? `<span class="guest-time">${escapeHtml(formatTime(checkin.checkedInAt))}</span>` : ""}
     </li>
   `;
 }
@@ -315,6 +333,7 @@ function renderRoute() {
 
   if (!guest || !checkin) {
     elements.detailView.classList.add("hidden");
+    document.body.classList.remove("sheet-open");
     return;
   }
 
@@ -322,6 +341,7 @@ function renderRoute() {
   elements.detailTime.textContent = formatDateTime(checkin.checkedInAt);
   elements.detailStatus.textContent = [guest.listId, guest.status, guest.category].filter(Boolean).join(" · ") || "VIP";
   elements.detailView.classList.remove("hidden");
+  document.body.classList.add("sheet-open");
 }
 
 async function toggleGuest(guestId) {
@@ -408,7 +428,7 @@ async function syncFromSheet() {
     render();
     renderRoute();
   } catch (error) {
-    state.syncStatus = "Sync unavailable, using local state";
+    setSyncStatus("Offline, saved on this phone", "error");
     render();
     console.error(error);
   }
@@ -417,10 +437,10 @@ async function syncFromSheet() {
 async function syncGuestCheckin(guest, checkedInAt) {
   try {
     await requestSync("checkin", { list: guest.listId, guestId: guest.sheetId, checkedInAt });
-    state.syncStatus = "Sync pending";
+    setSyncStatus("Sync pending", "pending");
     render();
   } catch (error) {
-    state.syncStatus = "Sync pending";
+    setSyncStatus("Sync pending", "pending");
     render();
     console.error(error);
   }
@@ -429,10 +449,10 @@ async function syncGuestCheckin(guest, checkedInAt) {
 async function syncGuestReset(guest) {
   try {
     await requestSync("reset", { list: guest.listId, guestId: guest.sheetId });
-    state.syncStatus = "Sync pending";
+    setSyncStatus("Sync pending", "pending");
     render();
   } catch (error) {
-    state.syncStatus = "Sync pending";
+    setSyncStatus("Sync pending", "pending");
     render();
     console.error(error);
   }

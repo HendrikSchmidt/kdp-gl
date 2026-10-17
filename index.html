@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
     <title>VIP Guestlist Check-In</title>
     <link rel="stylesheet" href="styles.css">
   </head>
@@ -20,33 +22,51 @@
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
+          enterkeyhint="go"
           placeholder="Access code"
           aria-label="Access code"
         >
         <p id="access-error" class="access-error" role="alert"></p>
-        <button id="access-submit" class="access-submit" type="submit">Unlock</button>
+        <button id="access-submit" class="primary-button" type="submit">Unlock</button>
       </form>
     </section>
 
     <main class="app-shell">
-      <section class="hero">
-        <div>
+      <header class="topbar">
+        <div class="topbar-row">
           <p class="eyebrow">VIP Guestlist</p>
-          <h1>Check-In</h1>
+          <span id="sync-status" class="sync-status" data-tone="pending" aria-live="polite">Syncing...</span>
         </div>
-        <div class="stats" aria-live="polite">
-          <span id="sync-status">Syncing with Google Sheets...</span>
-          <span><strong id="checked-count">0</strong> checked in</span>
-          <span><strong id="total-count">0</strong> total</span>
+        <div class="topbar-row">
+          <h1 id="list-title">Check-In</h1>
+          <p class="progress-count" aria-live="polite">
+            <strong id="checked-count">0</strong><span> / <span id="total-count">0</span></span>
+          </p>
         </div>
-      </section>
+        <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
+      </header>
 
-      <nav id="list-tabs-nav" class="list-tabs hidden" aria-label="Guest list views"></nav>
-
-      <section class="controls" aria-label="Guest search">
-        <label for="search">Search guest</label>
-        <input id="search" type="search" autocomplete="off" placeholder="Name, first name, status...">
-      </section>
+      <div id="toolbar-sentinel" class="toolbar-sentinel" aria-hidden="true"></div>
+      <div id="toolbar" class="toolbar">
+        <nav id="list-tabs-nav" class="list-tabs hidden" aria-label="Guest list views"></nav>
+        <div class="search">
+          <svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m13.5 13.5 4 4"/></svg>
+          <input
+            id="search"
+            type="search"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="search"
+            placeholder="Search name or status"
+            aria-label="Search guest"
+          >
+          <button id="clear-search" class="clear-search hidden" type="button" aria-label="Clear search">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8M14 6l-8 8"/></svg>
+          </button>
+        </div>
+      </div>
 
       <section class="list-panel">
         <div id="loading" class="message">Loading guest list...</div>
@@ -55,22 +75,27 @@
       </section>
     </main>
 
-    <aside id="detail-view" class="detail-view hidden" aria-labelledby="detail-title">
-      <button id="close-detail" class="ghost-button" type="button">Back to list</button>
-      <p class="eyebrow">Checked in guest</p>
-      <h2 id="detail-title">Guest details</h2>
-      <dl>
-        <div>
-          <dt>Checked in at</dt>
-          <dd id="detail-time"></dd>
+    <div id="detail-view" class="sheet-backdrop hidden">
+      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <p class="eyebrow">Checked in</p>
+        <h2 id="detail-title">Guest details</h2>
+        <dl>
+          <div>
+            <dt>Checked in at</dt>
+            <dd id="detail-time"></dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd id="detail-status"></dd>
+          </div>
+        </dl>
+        <div class="sheet-actions">
+          <button id="reset-guest" class="danger-button" type="button">Check out / reset status</button>
+          <button id="close-detail" class="secondary-button" type="button">Close</button>
         </div>
-        <div>
-          <dt>Status</dt>
-          <dd id="detail-status"></dd>
-        </div>
-      </dl>
-      <button id="reset-guest" class="danger-button" type="button">Check out / reset status</button>
-    </aside>
+      </aside>
+    </div>
 
     <script src="sync-config.js"></script>
     <script src="app.js" type="module"></script>
