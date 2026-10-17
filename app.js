@@ -267,13 +267,17 @@ function render() {
 }
 
 function renderListTabs() {
-  elements.listTabsNav.classList.toggle("hidden", state.listIds.length <= 1);
-  const listTabsHtml = state.listIds
-    .map((listId) => {
-      const isActive = listId === state.activeListId;
-      return `<button class="list-tab${isActive ? " active" : ""}" type="button" aria-pressed="${isActive}" data-list-tab="${escapeHtml(listId)}">${escapeHtml(listId)}</button>`;
-    })
-    .join("");
+  elements.listTabsNav.classList.toggle("hidden", state.listIds.length === 0);
+  // A single list is shown as a label, so there is nothing to tap by mistake.
+  const listTabsHtml =
+    state.listIds.length === 1
+      ? `<span class="list-tab active">${escapeHtml(state.listIds[0])}</span>`
+      : state.listIds
+          .map((listId) => {
+            const isActive = listId === state.activeListId;
+            return `<button class="list-tab${isActive ? " active" : ""}" type="button" aria-pressed="${isActive}" data-list-tab="${escapeHtml(listId)}">${escapeHtml(listId)}</button>`;
+          })
+          .join("");
   if (listTabsHtml !== renderedListTabsHtml) {
     elements.listTabsNav.innerHTML = listTabsHtml;
     renderedListTabsHtml = listTabsHtml;

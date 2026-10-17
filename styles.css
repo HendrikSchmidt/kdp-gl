@@ -119,6 +119,11 @@ h2 {
   transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
+span.list-tab {
+  display: inline-flex;
+  align-items: center;
+}
+
 .list-tab:hover {
   color: var(--ink);
 }

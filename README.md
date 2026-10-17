@@ -59,7 +59,7 @@ The Sheet decides. Every visible tab with a `Name` (or `Nachname`) header become
 - A skiplist-only event just needs a `Skipliste` tab; no `Gästeliste` tab is required.
 - Tabs without a `Name` header (notes, pricing, etc.) are ignored and left untouched.
 - Hide a tab (right-click > **Hide sheet**) to keep it out of the app, e.g. an old list you want to keep around.
-- With only one list, the app hides the list switcher and shows that list directly.
+- With only one list, the app shows its name as a label instead of a switcher.
 - Adding, renaming, or hiding a tab shows up in open apps on the next sync. Renaming a tab mid-event is fine, but a check-in tapped in the same few seconds can fail and needs to be tapped again.
 
 ## Access codes
