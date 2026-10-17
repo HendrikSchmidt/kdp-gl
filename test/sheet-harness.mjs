@@ -61,8 +61,11 @@ export function createSheet(rows) {
   };
 }
 
-export function createSpreadsheet(sheets) {
+export function createSpreadsheet(sheets, name = "") {
   return {
+    getName() {
+      return name;
+    },
     getSheetByName(name) {
       return sheets[name] || null;
     },

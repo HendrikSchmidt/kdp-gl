@@ -225,6 +225,13 @@ test("every visible tab with a Name column becomes a list, in tab order", () => 
   assert.deepEqual(sheets.Notizen._rows, [["Notiz", "Plus"], ["x", "y"]]);
 });
 
+test("the list response carries the spreadsheet file name as its title", () => {
+  const api = loadAppsScript();
+  api.setSpreadsheet(createSpreadsheet({ Gästeliste: createSheet([["Name"], ["Weber"]]) }, "Frachtkante 17.10."));
+
+  assert.equal(api.doGet({ action: "list" }).title, "Frachtkante 17.10.");
+});
+
 test("a sheet with only Skipliste works without a Gästeliste tab", () => {
   const skip = createSheet([["Name", "Vorname"], ["Klein", "Eva"]]);
   const api = loadAppsScript();

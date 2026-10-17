@@ -12,6 +12,7 @@ const syncConfig = configuredSync ? { ...defaultSyncConfig, ...configuredSync } 
 
 // Lists are the sheet's tabs, keyed by tab name. listIds keeps the tab order.
 const state = {
+  title: "",
   activeListId: "",
   listIds: [],
   lists: {},
@@ -31,7 +32,7 @@ const elements = {
   checkedCount: document.querySelector("#checked-count"),
   syncStatus: document.querySelector("#sync-status"),
   totalCount: document.querySelector("#total-count"),
-  listTitle: document.querySelector("#list-title"),
+  eventTitle: document.querySelector("#event-title"),
   progressFill: document.querySelector("#progress-fill"),
   clearSearch: document.querySelector("#clear-search"),
   toolbar: document.querySelector("#toolbar"),
@@ -251,10 +252,14 @@ async function fetchSnapshot() {
     throw new Error("The Apps Script is out of date. Deploy the current google-apps-script.js.");
   }
 
-  return response.lists.map(({ name, guests }) => ({ id: name, guests: mapGuestRows(guests, name) }));
+  return {
+    title: clean(response.title),
+    lists: response.lists.map(({ name, guests }) => ({ id: name, guests: mapGuestRows(guests, name) })),
+  };
 }
 
-function applySnapshot(lists) {
+function applySnapshot({ title, lists }) {
+  state.title = title;
   state.listIds = lists.map((list) => list.id);
   state.lists = Object.fromEntries(lists.map((list) => [list.id, list.guests]));
   if (!state.listIds.includes(state.activeListId)) {
@@ -280,7 +285,7 @@ function render() {
   elements.progressFill.style.width = `${activeGuests.length ? (checkedCount / activeGuests.length) * 100 : 0}%`;
   elements.syncStatus.textContent = state.syncStatus;
   elements.syncStatus.dataset.tone = state.syncTone;
-  elements.listTitle.textContent = state.activeListId || "Check-In";
+  elements.eventTitle.textContent = state.title || "Check-In";
   elements.clearSearch.classList.toggle("hidden", !state.query);
   renderListTabs();
   elements.emptyState.classList.toggle("hidden", filteredGuests.length > 0);
@@ -293,7 +298,6 @@ function render() {
 }
 
 function renderListTabs() {
-  // A single list is already named in the title, so there is nothing to switch.
   elements.listTabsNav.classList.toggle("hidden", state.listIds.length < 2);
   const listTabsHtml = state.listIds
     .map((listId) => {
@@ -419,12 +423,12 @@ async function syncFromSheet() {
   const syncRun = Date.now();
 
   try {
-    const lists = await fetchSnapshot();
+    const snapshot = await fetchSnapshot();
     if (syncRun < latestAppliedSyncRun) {
       return;
     }
     latestAppliedSyncRun = syncRun;
-    applySnapshot(lists);
+    applySnapshot(snapshot);
     render();
     renderRoute();
   } catch (error) {

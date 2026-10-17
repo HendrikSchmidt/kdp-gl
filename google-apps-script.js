@@ -20,7 +20,7 @@ function doGet(event) {
     const action = params.action || "list";
 
     if (action === "list") {
-      return jsonp(callback, { ok: true, lists: getLists() });
+      return jsonp(callback, { ok: true, title: SpreadsheetApp.getActiveSpreadsheet().getName(), lists: getLists() });
     }
 
     if (action === "checkin") {

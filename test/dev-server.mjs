@@ -22,7 +22,7 @@ sheets.Gästeliste.name = "Gästeliste";
 sheets.Skipliste.name = "Skipliste";
 
 const api = loadAppsScript();
-api.setSpreadsheet(createSpreadsheet(sheets));
+api.setSpreadsheet(createSpreadsheet(sheets, "Sommerfest 2026"));
 
 const types = {
   ".html": "text/html; charset=utf-8",

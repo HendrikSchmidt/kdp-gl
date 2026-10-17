@@ -59,7 +59,7 @@ The Sheet decides. Every visible tab with a `Name` (or `Nachname`) header become
 - A skiplist-only event just needs a `Skipliste` tab; no `Gästeliste` tab is required.
 - Tabs without a `Name` header (notes, pricing, etc.) are ignored and left untouched.
 - Hide a tab (right-click > **Hide sheet**) to keep it out of the app, e.g. an old list you want to keep around.
-- With only one list, the app shows its name as a label instead of a switcher.
+- With only one list, the app hides the switcher.
 - Adding, renaming, or hiding a tab shows up in open apps on the next sync. Renaming a tab mid-event is fine, but a check-in tapped in the same few seconds can fail and needs to be tapped again.
 
 ## Access codes
@@ -85,6 +85,7 @@ Edit the list tabs in your Google Sheet. Open apps pick up new rows and edited c
 ## Checklist for a new event
 
 1. **Sheet**: create a new Google Sheet (or reuse/duplicate a previous one) for the event.
+   - Name the file after the event. The app shows the file name as its title.
    - Add a tab for each list the event needs (e.g. `Skipliste` and/or `Gästeliste`). Hide or delete list tabs from a previous event that shouldn't show up.
    - Each list tab needs a header row: `Name`, and optionally `Vorname`, `Status`, and `Kategorie`. The script adds the `ID` and `Eingecheckt` columns itself.
    - Fill in one guest per row below the header. Incomplete rows are okay.
